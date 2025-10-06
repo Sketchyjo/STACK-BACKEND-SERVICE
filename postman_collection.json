@@ -1,0 +1,207 @@
+{
+  "info": {
+    "name": "stack_service API",
+    "description": "Postman collection for stack_service API - auto-generated from internal/api/routes/routes.go\nReplace {{base_url}} and {{token}} as needed before running requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "token", "value": "" },
+    { "key": "provider_ref", "value": "example-ref" },
+    { "key": "user_id", "value": "1" },
+    { "key": "basket_id", "value": "1" },
+    { "key": "card_id", "value": "1" },
+    { "key": "transaction_id", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "Misc",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "Metrics",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{base_url}}/metrics", "host": ["{{base_url}}"], "path": ["metrics"] } }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"P@ssw0rd!\",\n  \"first_name\": \"Alice\",\n  \"last_name\": \"Example\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/register", "host": ["{{base_url}}"], "path": ["api","v1","auth","register"] }
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"P@ssw0rd!\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/login", "host": ["{{base_url}}"], "path": ["api","v1","auth","login"] }
+          }
+        },
+        {
+          "name": "Refresh",
+          "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"refresh_token\": \"<refresh_token>\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/auth/refresh", "host": ["{{base_url}}"], "path": ["api","v1","auth","refresh"] } }
+        },
+        {
+          "name": "Logout",
+          "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/auth/logout", "host": ["{{base_url}}"], "path": ["api","v1","auth","logout"] } }
+        },
+        {
+          "name": "Forgot Password",
+          "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"email\": \"alice@example.com\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/auth/forgot-password", "host": ["{{base_url}}"], "path": ["api","v1","auth","forgot-password"] } }
+        },
+        {
+          "name": "Reset Password",
+          "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"reset_token\": \"<token>\",\n  \"password\": \"NewP@ssw0rd!\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/auth/reset-password", "host": ["{{base_url}}"], "path": ["api","v1","auth","reset-password"] } }
+        },
+        {
+          "name": "Verify Email",
+          "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"verification_token\": \"<token>\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/auth/verify-email", "host": ["{{base_url}}"], "path": ["api","v1","auth","verify-email"] } }
+        }
+      ]
+    },
+    {
+      "name": "Onboarding",
+      "item": [
+        { "name": "Start", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"first_name\": \"Alice\",\n  \"last_name\": \"Example\",\n  \"dob\": \"1990-01-01\",\n  \"address\": { \"line1\": \"123 Main St\", \"city\": \"City\", \"country\": \"US\" }\n}" }, "url": { "raw": "{{base_url}}/api/v1/onboarding/start", "host": ["{{base_url}}"], "path": ["api","v1","onboarding","start"] } } },
+        { "name": "Status", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/onboarding/status?user_id={{user_id}}", "host": ["{{base_url}}"], "path": ["api","v1","onboarding","status"] } } },
+        { "name": "Submit KYC", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"provider\": \"provider-name\",\n  \"external_id\": \"ext-12345\",\n  \"documents\": [ { \"type\": \"id_card\", \"url\": \"https://example.com/doc.jpg\" } ]\n}" }, "url": { "raw": "{{base_url}}/api/v1/onboarding/kyc/submit", "host": ["{{base_url}}"], "path": ["api","v1","onboarding","kyc","submit"] } } }
+      ]
+    },
+    {
+      "name": "KYC",
+      "item": [
+        { "name": "Callback (provider_ref)", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"provider\": \"provider-name\",\n  \"status\": \"approved\",\n  \"reference\": \"kyc-12345\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/kyc/callback/{{provider_ref}}", "host": ["{{base_url}}"], "path": ["api","v1","kyc","callback","{{provider_ref}}"] } } }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        { "name": "Get Profile", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/users/me", "host": ["{{base_url}}"], "path": ["api","v1","users","me"] } } },
+        { "name": "Update Profile", "request": { "method": "PUT", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"first_name\": \"Alice Updated\",\n  \"last_name\": \"Example\",\n  \"phone\": \"+15551234567\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/users/me", "host": ["{{base_url}}"], "path": ["api","v1","users","me"] } } },
+        { "name": "Change Password", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"old_password\": \"P@ssw0rd!\",\n  \"new_password\": \"NewP@ssw0rd!\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/users/me/change-password", "host": ["{{base_url}}"], "path": ["api","v1","users","me","change-password"] } } },
+        { "name": "Delete Account", "request": { "method": "DELETE", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/users/me", "host": ["{{base_url}}"], "path": ["api","v1","users","me"] } } },
+        { "name": "Enable 2FA", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/users/me/enable-2fa", "host": ["{{base_url}}"], "path": ["api","v1","users","me","enable-2fa"] } } },
+        { "name": "Disable 2FA", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/users/me/disable-2fa", "host": ["{{base_url}}"], "path": ["api","v1","users","me","disable-2fa"] } } }
+      ]
+    },
+    {
+      "name": "Wallet",
+      "item": [
+        { "name": "Addresses", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/wallet/addresses", "host": ["{{base_url}}"], "path": ["api","v1","wallet","addresses"] } } },
+        { "name": "Status", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/wallet/status", "host": ["{{base_url}}"], "path": ["api","v1","wallet","status"] } } }
+      ]
+    },
+    {
+      "name": "Baskets",
+      "item": [
+        { "name": "List", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/baskets/", "host": ["{{base_url}}"], "path": ["api","v1","baskets",""] } } },
+        { "name": "Create", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Growth Basket\",\n  \"description\": \"A diversified growth-focused basket\",\n  \"allocation\": { \"BTC\": 50, \"ETH\": 50 }\n}" }, "url": { "raw": "{{base_url}}/api/v1/baskets/", "host": ["{{base_url}}"], "path": ["api","v1","baskets",""] } } },
+        { "name": "Get", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/baskets/{{basket_id}}", "host": ["{{base_url}}"], "path": ["api","v1","baskets","{{basket_id}}"] } } },
+        { "name": "Update", "request": { "method": "PUT", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Updated Basket Name\",\n  \"description\": \"Updated description\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/baskets/{{basket_id}}", "host": ["{{base_url}}"], "path": ["api","v1","baskets","{{basket_id}}"] } } },
+        { "name": "Delete", "request": { "method": "DELETE", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/baskets/{{basket_id}}", "host": ["{{base_url}}"], "path": ["api","v1","baskets","{{basket_id}}"] } } },
+        { "name": "Invest", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"amount\": 100.00,\n  \"currency\": \"USD\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/baskets/{{basket_id}}/invest", "host": ["{{base_url}}"], "path": ["api","v1","baskets","{{basket_id}}","invest"] } } },
+        { "name": "Withdraw", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"amount\": 50.00,\n  \"currency\": \"USD\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/baskets/{{basket_id}}/withdraw", "host": ["{{base_url}}"], "path": ["api","v1","baskets","{{basket_id}}","withdraw"] } } }
+      ]
+    },
+    {
+      "name": "Curated",
+      "item": [
+        { "name": "List Baskets", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/curated/baskets", "host": ["{{base_url}}"], "path": ["api","v1","curated","baskets"] } } },
+        { "name": "Get Basket", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/curated/baskets/{{basket_id}}", "host": ["{{base_url}}"], "path": ["api","v1","curated","baskets","{{basket_id}}"] } } },
+        { "name": "Invest", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"amount\": 100.00,\n  \"currency\": \"USD\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/curated/baskets/{{basket_id}}/invest", "host": ["{{base_url}}"], "path": ["api","v1","curated","baskets","{{basket_id}}","invest"] } } }
+      ]
+    },
+    {
+      "name": "Copy",
+      "item": [
+        { "name": "Get Traders", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/copy/traders", "host": ["{{base_url}}"], "path": ["api","v1","copy","traders"] } } },
+        { "name": "Get Trader", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/copy/traders/{{user_id}}", "host": ["{{base_url}}"], "path": ["api","v1","copy","traders","{{user_id}}"] } } },
+        { "name": "Follow Trader", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"allocate_percent\": 10\n}" }, "url": { "raw": "{{base_url}}/api/v1/copy/traders/{{user_id}}/follow", "host": ["{{base_url}}"], "path": ["api","v1","copy","traders","{{user_id}}","follow"] } } },
+        { "name": "Unfollow Trader", "request": { "method": "DELETE", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/copy/traders/{{user_id}}/unfollow", "host": ["{{base_url}}"], "path": ["api","v1","copy","traders","{{user_id}}","unfollow"] } } },
+        { "name": "Following", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/copy/following", "host": ["{{base_url}}"], "path": ["api","v1","copy","following"] } } },
+        { "name": "Followers", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/copy/followers", "host": ["{{base_url}}"], "path": ["api","v1","copy","followers"] } } }
+      ]
+    },
+    {
+      "name": "Cards",
+      "item": [
+        { "name": "List", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/cards/", "host": ["{{base_url}}"], "path": ["api","v1","cards",""] } } },
+        { "name": "Create", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"card_token\": \"tok_visa_123\",\n  \"nickname\": \"My Card\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/cards/", "host": ["{{base_url}}"], "path": ["api","v1","cards",""] } } },
+        { "name": "Get", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/cards/{{card_id}}", "host": ["{{base_url}}"], "path": ["api","v1","cards","{{card_id}}"] } } },
+        { "name": "Update", "request": { "method": "PUT", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"nickname\": \"Updated Card Nick\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/cards/{{card_id}}", "host": ["{{base_url}}"], "path": ["api","v1","cards","{{card_id}}"] } } },
+        { "name": "Delete", "request": { "method": "DELETE", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/cards/{{card_id}}", "host": ["{{base_url}}"], "path": ["api","v1","cards","{{card_id}}"] } } },
+        { "name": "Freeze", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/cards/{{card_id}}/freeze", "host": ["{{base_url}}"], "path": ["api","v1","cards","{{card_id}}","freeze"] } } },
+        { "name": "Unfreeze", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/cards/{{card_id}}/unfreeze", "host": ["{{base_url}}"], "path": ["api","v1","cards","{{card_id}}","unfreeze"] } } },
+        { "name": "Transactions", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/cards/{{card_id}}/transactions", "host": ["{{base_url}}"], "path": ["api","v1","cards","{{card_id}}","transactions"] } } }
+      ]
+    },
+    {
+      "name": "Transactions",
+      "item": [
+        { "name": "List", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/transactions/", "host": ["{{base_url}}"], "path": ["api","v1","transactions",""] } } },
+        { "name": "Get", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/transactions/{{transaction_id}}", "host": ["{{base_url}}"], "path": ["api","v1","transactions","{{transaction_id}}"] } } },
+        { "name": "Deposit", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"amount\": 150.00,\n  \"currency\": \"USD\",\n  \"source\": \"bank_transfer\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/transactions/deposit", "host": ["{{base_url}}"], "path": ["api","v1","transactions","deposit"] } } },
+        { "name": "Withdraw", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"amount\": 100.00,\n  \"currency\": \"USD\",\n  \"destination\": \"bank_account\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/transactions/withdraw", "host": ["{{base_url}}"], "path": ["api","v1","transactions","withdraw"] } } },
+        { "name": "Transfer", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"amount\": 25.00,\n  \"currency\": \"USD\",\n  \"to_user_id\": 2\n}" }, "url": { "raw": "{{base_url}}/api/v1/transactions/transfer", "host": ["{{base_url}}"], "path": ["api","v1","transactions","transfer"] } } },
+        { "name": "Swap", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"from\": \"BTC\",\n  \"to\": \"ETH\",\n  \"amount\": 0.01\n}" }, "url": { "raw": "{{base_url}}/api/v1/transactions/swap", "host": ["{{base_url}}"], "path": ["api","v1","transactions","swap"] } } }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        { "name": "Portfolio", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/analytics/portfolio", "host": ["{{base_url}}"], "path": ["api","v1","analytics","portfolio"] } } },
+        { "name": "Performance", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/analytics/performance", "host": ["{{base_url}}"], "path": ["api","v1","analytics","performance"] } } },
+        { "name": "Allocation", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/analytics/allocation", "host": ["{{base_url}}"], "path": ["api","v1","analytics","allocation"] } } },
+        { "name": "History", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/analytics/history", "host": ["{{base_url}}"], "path": ["api","v1","analytics","history"] } } }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        { "name": "List", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/notifications/", "host": ["{{base_url}}"], "path": ["api","v1","notifications",""] } } },
+        { "name": "Mark Read", "request": { "method": "PUT", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/notifications/{{transaction_id}}/read", "host": ["{{base_url}}"], "path": ["api","v1","notifications","{{transaction_id}}","read"] } } },
+        { "name": "Mark All Read", "request": { "method": "PUT", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/notifications/read-all", "host": ["{{base_url}}"], "path": ["api","v1","notifications","read-all"] } } },
+        { "name": "Delete", "request": { "method": "DELETE", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/notifications/{{transaction_id}}", "host": ["{{base_url}}"], "path": ["api","v1","notifications","{{transaction_id}}"] } } }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        { "name": "Get Users", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/admin/users", "host": ["{{base_url}}"], "path": ["api","v1","admin","users"] } } },
+        { "name": "Get User By ID", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/admin/users/{{user_id}}", "host": ["{{base_url}}"], "path": ["api","v1","admin","users","{{user_id}}"] } } },
+        { "name": "Update User Status", "request": { "method": "PUT", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"status\": \"active\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/admin/users/{{user_id}}/status", "host": ["{{base_url}}"], "path": ["api","v1","admin","users","{{user_id}}","status"] } } },
+        { "name": "Get Transactions", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/admin/transactions", "host": ["{{base_url}}"], "path": ["api","v1","admin","transactions"] } } },
+        { "name": "System Analytics", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/admin/analytics/system", "host": ["{{base_url}}"], "path": ["api","v1","admin","analytics","system"] } } },
+        { "name": "Create Curated Basket", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Curated Growth\",\n  \"description\": \"Featured curated basket\",\n  \"allocation\": { \"BTC\": 60, \"ETH\": 40 }\n}" }, "url": { "raw": "{{base_url}}/api/v1/admin/baskets/curated", "host": ["{{base_url}}"], "path": ["api","v1","admin","baskets","curated"] } } },
+        { "name": "Update Curated Basket", "request": { "method": "PUT", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Curated Growth Updated\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/admin/baskets/curated/{{basket_id}}", "host": ["{{base_url}}"], "path": ["api","v1","admin","baskets","curated","{{basket_id}}"] } } },
+        { "name": "Wallet Create For User", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"user_id\": 1\n}" }, "url": { "raw": "{{base_url}}/api/v1/admin/wallet/create", "host": ["{{base_url}}"], "path": ["api","v1","admin","wallet","create"] } } },
+        { "name": "Wallet Retry Provisioning", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"wallet_id\": \"wallet-123\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/admin/wallet/retry-provisioning", "host": ["{{base_url}}"], "path": ["api","v1","admin","wallet","retry-provisioning"] } } },
+        { "name": "Wallet Health", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/admin/wallet/health", "host": ["{{base_url}}"], "path": ["api","v1","admin","wallet","health"] } } }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        { "name": "Payment", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"id\": \"pay_123\",\n  \"amount\": 100.00,\n  \"currency\": \"USD\",\n  \"status\": \"completed\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/payment", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","payment"] } } },
+        { "name": "Blockchain", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"txid\": \"0xabc123\",\n  \"confirmations\": 3,\n  \"status\": \"confirmed\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/blockchain", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","blockchain"] } } },
+        { "name": "Cards", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"card_id\": \"card_123\",\n  \"event\": \"activated\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/cards", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","cards"] } } }
+      ]
+    }
+  ]
+}
