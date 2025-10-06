@@ -1,20 +1,71 @@
-# Stack Service
+# STACK - GenZ Web3 Investment Platform
 
-A professional GenZ Web3 multi-chain investment platform API that allows users to fund accounts with stablecoins from different chains, create curated investment baskets, use debit cards, and engage in copy trading.
+STACK is a Web3-native investment platform designed specifically for Gen Z users who are underserved by traditional banks and overwhelmed by complex crypto tools. It enables instant wealth-building through a hybrid model: fiat-to-stablecoin on-ramps, seamless investment in stocks/ETFs, and a protective AI CFO.
 
-## 🚀 Features
+The platform bridges the gap between traditional finance and Web3 by providing a safe, frictionless investment experience that demystifies Web3 while outperforming legacy banking in speed and fairness.
 
-- **Multi-Chain Wallet Support**: Ethereum, Polygon, Binance Smart Chain, and more
-- **Stablecoin Integration**: USDC, USDT, BUSD across multiple networks
-- **Investment Baskets**: Curated and custom portfolios with automatic rebalancing
-- **Copy Trading**: Follow top traders and mirror their strategies
-- **Debit Cards**: Virtual and physical cards linked to crypto portfolios
-- **Advanced Security**: JWT authentication, 2FA, encryption, audit trails
-- **Real-time Analytics**: Portfolio tracking, performance metrics, risk analysis
-- **RESTful API**: Comprehensive API with Swagger documentation
-- **Scalable Architecture**: Clean architecture with repository pattern
+## 🎯 Mission
 
-## 🏗️ Architecture
+To empower the next generation of investors with a platform that combines the accessibility of traditional finance with the innovation of Web3, delivered through an experience that feels designed for Gen Z culture.
+
+## 🎯 Goals & Background
+
+### Business Goals
+- Drive rapid adoption with 10,000 Monthly Active Users (MAU) within the first 6 months of launch
+- Establish a recurring revenue stream by converting at least 5% of free users into premium subscribers in year one
+- Validate market viability by processing $1,000,000 in investments within the first year
+- Position STACK as the first mover in the Gen Z-native hybrid Web3 + traditional finance investment space
+
+### User Goals
+- Create a safe, frictionless investment platform that demystifies Web3 while outperforming legacy banking in speed and fairness
+- Deliver a product experience that matches the expectations of digital-native Gen Z: fast, social, intuitive, and aligned with values like sustainability and fairness
+- Encourage consistent investing behavior through gamification and protective guidance from an AI CFO
+
+## 👥 Target Users
+
+### Primary User Persona: "Taylor" - The Conscious & Connected Investor
+- **Age**: 22
+- **Profile**: Digitally native, balances part-time work with side hustles. Ambitious but cautious.
+- **Digital Habits**: Lives on TikTok, Instagram, Reddit, and Discord. Uses Notion/Pinterest for visual planning. Expects fast, engaging, intuitive experiences that feel like "TikTok-meets-Cash App."
+- **Financial Behaviors**: Keeps most funds in savings + P2P apps (Cash App, Venmo). Dabbles on Robinhood but distrusts its business model. Avoids crypto due to complexity.
+- **Values/Motivations**: Wants financial independence, safety, and alignment with identity (e.g., sustainability, social impact). Goals: travel fund, apartment savings, safety net.
+
+### Secondary Personas
+- **Jordan** - The Banking-Frustrated Beginner (Age 21): Clunky traditional banking, delays (3–5 day ACH transfers), and punitive fees. Feels alienated by outdated systems.
+- **Chris** - The Crypto-Curious but Overwhelmed (Age 19): Intimidated by seed phrases, high gas fees, and irreversible mistakes. Tried but abandoned crypto apps after losing money.
+
+## 🚀 Core Features (MVP)
+
+### 1. User Onboarding & Managed Wallet
+- Simple sign-up with automatic creation of a secure, managed wallet
+- No seed phrase complexity; custody abstracted away
+- KYC/AML orchestration for compliance
+
+### 2. Stablecoin Deposits
+- Support deposits from at least one EVM chain (e.g., Ethereum) and one non-EVM chain (e.g., Solana)
+- Conversion into stablecoins for immediate use as buying power
+- Multi-chain wallet support for Ethereum, Polygon, Binance Smart Chain, and more
+
+### 3. Investment Flow
+- Automatic conversion of stablecoins into fiat-equivalent buying power
+- Ability to invest in curated baskets of stocks/ETFs
+- Simple portfolio view with performance tracking
+
+### 4. Curated Investment Baskets
+- Launch with 5–10 "expert-curated" investment baskets (e.g., Tech Growth, Sustainability, ETFs)
+- Designed to simplify decision-making for new investors
+- Balanced for simplicity + diversity
+
+### 5. AI CFO (MVP Version)
+- Provides automated weekly performance summaries
+- On-demand portfolio analysis to highlight diversification, risk, and potential mistakes
+- Uses 0G for inference and storage capabilities
+
+### 6. Brokerage Integration
+- Secure backend integration for trade execution and custody of traditional assets
+- Connection with brokerage partners for stock/ETF trading
+
+## 🏗️ Architecture Overview
 
 ```
 stack_service/
@@ -29,25 +80,41 @@ stack_service/
 │   │   ├── entities/      # Domain entities/models
 │   │   ├── repositories/  # Repository interfaces
 │   │   └── services/      # Business logic services
-│   └── infrastructure/    # External concerns
-│       ├── blockchain/    # Blockchain integrations
-│       ├── database/      # Database connections
-│       ├── config/        # Configuration management
-│       └── cache/         # Caching layer
+│   ├── infrastructure/    # External concerns
+│   │   ├── adapters/      # External service adapters
+│   │   ├── circle/        # Circle API integration
+│   │   ├── config/        # Configuration management
+│   │   ├── database/      # Database connections
+│   │   ├── di/            # Dependency injection
+│   │   ├── repositories/  # Repository implementations
+│   │   └── zerog/        # 0G integration
+│   ├── workers/           # Background workers
+│   │   ├── aicfo_scheduler/ # AI CFO scheduler
+│   │   ├── funding_webhook/ # Funding webhook processor
+│   │   └── wallet_provisioning/ # Wallet provisioning worker
+│   └── zerog/             # 0G integration components
 ├── pkg/                   # Public libraries
-│   ├── auth/             # Authentication utilities
-│   ├── crypto/           # Cryptographic functions
-│   ├── logger/           # Logging utilities
-│   └── utils/            # General utilities
-├── migrations/           # Database migrations
-├── configs/              # Configuration files
-├── deployments/          # Deployment configurations
-├── scripts/              # Build and deployment scripts
-└── tests/                # Test files
-    ├── unit/             # Unit tests
-    ├── integration/      # Integration tests
-    └── e2e/              # End-to-end tests
+│   ├── auth/              # Authentication utilities
+│   ├── crypto/            # Cryptographic functions
+│   ├── logger/            # Logging utilities
+│   ├── retry/             # Retry utilities
+│   └── webhook/           # Webhook security
+├── migrations/            # Database migrations
+├── configs/               # Configuration files
+├── deployments/           # Deployment configurations
+├── scripts/               # Build and deployment scripts
+└── tests/                 # Test files
+    ├── unit/              # Unit tests
+    ├── integration/       # Integration tests
+    └── e2e/               # End-to-end tests
 ```
+
+### Domain Services (MVP)
+- **Onboarding Service**: sign-up, profile, KYC/AML orchestration, feature flags
+- **Wallet Service**: managed wallet lifecycle, address issuance, custody abstraction
+- **Funding Service**: deposit address generation, webhook listeners, confirmations, auto-convert → buying power
+- **Investing Service**: basket catalog, orders (buy/sell), portfolio & positions, P&L calc, brokerage adapter
+- **AI-CFO Service (Lite)**: weekly summaries, on-demand analysis, insight templates, uses 0G for inference & storage
 
 ## 🛠️ Technology Stack
 
@@ -56,11 +123,31 @@ stack_service/
 - **Database**: PostgreSQL 15
 - **Cache**: Redis 7
 - **Authentication**: JWT tokens
-- **Blockchain**: Ethereum, Polygon, BSC
+- **Blockchain**: Ethereum, Polygon, BSC, Solana
 - **Containerization**: Docker & Docker Compose
 - **Documentation**: Swagger/OpenAPI
 - **Testing**: Go testing, Testify
 - **Monitoring**: Prometheus, Grafana
+- **AI/Storage**: 0G Integration for AI inference and secure object storage
+- **Wallet Infrastructure**: Circle for stablecoins and wallet infrastructure
+
+## 📊 Success Metrics
+
+### Business Objectives
+- **User Acquisition**: 10,000 Monthly Active Users (MAU) within 6 months post-launch
+- **Monetization**: 5% conversion from free users to premium tier in Year 1
+- **Validation**: $1,000,000 in processed investment volume in Year 1
+
+### User Success Metrics
+- **Empowerment**: Users feel more in control of their financial future (via surveys)
+- **Confidence**: Users feel safe and protected (via NPS and retention)
+- **Habit Formation**: % of users with recurring investments increases steadily
+
+### Key Performance Indicators (KPIs)
+- **Engagement**: Daily Active Users (DAU), Monthly Active Users (MAU)
+- **Retention**: Week 1, Month 1, Month 3 retention rates
+- **Conversion**: Sign-up → Funded Account rate; Free → Premium rate
+- **Financial**: Total Assets Under Management (AUM)
 
 ## 🚀 Quick Start
 
@@ -91,7 +178,7 @@ Update the configuration file with your settings:
 - JWT secret
 - Encryption key
 - Blockchain RPC endpoints
-- API keys for external services
+- API keys for external services (Circle, 0G, brokerage)
 
 4. **Start with Docker Compose**
 ```bash
@@ -155,16 +242,32 @@ Authorization: Bearer <your-jwt-token>
 - `POST /api/v1/auth/refresh` - Refresh access token
 - `POST /api/v1/auth/logout` - Logout
 
+#### Onboarding
+- `POST /api/v1/onboarding/start` - Start onboarding process
+- `GET /api/v1/onboarding/status` - Get onboarding status
+- `POST /api/v1/kyc/submit` - Submit KYC documents
+
 #### Wallets
 - `GET /api/v1/wallets` - Get user wallets
 - `POST /api/v1/wallets` - Create new wallet
 - `GET /api/v1/wallets/{id}/balance` - Get wallet balance
+- `GET /api/v1/wallet/addresses?chain=eth|sol` - Get deposit addresses
+
+#### Funding
+- `POST /api/v1/funding/deposit/address` - Generate deposit address
+- `POST /api/v1/funding/webhooks/chain` - Chain webhook endpoints
+- `GET /api/v1/funding/confirmations` - Get deposit confirmations
 
 #### Investment Baskets
 - `GET /api/v1/baskets` - Get user baskets
 - `POST /api/v1/baskets` - Create custom basket
 - `GET /api/v1/curated/baskets` - Get curated baskets
 - `POST /api/v1/baskets/{id}/invest` - Invest in basket
+- `GET /api/v1/portfolio` - Get user portfolio
+
+#### AI CFO
+- `GET /api/v1/ai/summary/latest` - Get latest AI summary
+- `POST /api/v1/ai/analyze` - Perform on-demand analysis
 
 #### Copy Trading
 - `GET /api/v1/copy/traders` - Get top traders
@@ -172,7 +275,7 @@ Authorization: Bearer <your-jwt-token>
 
 #### Cards
 - `GET /api/v1/cards` - Get user cards
-- `POST /api/v1/cards` - Create virtual card
+- `POST /api/v1/cards` - Create physical card
 - `POST /api/v1/cards/{id}/freeze` - Freeze card
 
 ### Complete API documentation is available at `/swagger/index.html` when running the server.
@@ -212,6 +315,7 @@ go tool cover -html=coverage.out
 - Input validation and sanitization
 - Audit logging
 - Session management
+- KYC/AML integration for compliance
 
 ### Security Best Practices
 - All sensitive data is encrypted at rest
@@ -220,6 +324,7 @@ go tool cover -html=coverage.out
 - Comprehensive audit trails
 - Two-factor authentication support
 - IP whitelisting for admin endpoints
+- Secure custody abstraction via wallet manager
 
 ## 🔧 Configuration
 
@@ -252,7 +357,31 @@ blockchain:
     ethereum:
       chain_id: 1
       rpc: "https://eth-mainnet.alchemyapi.io/v2/YOUR-API-KEY"
-      # ... more networks
+    polygon:
+      chain_id: 137
+      rpc: "https://polygon-rpc.com"
+    bsc:
+      chain_id: 56
+      rpc: "https://bsc-dataseed.binance.org"
+    solana:
+      rpc: "https://api.mainnet-beta.solana.com"
+
+# 0G Integration
+zerog:
+  storage:
+    endpoint: "https://storage.0g.ai"
+    access_key: "${ZEROG_STORAGE_ACCESS_KEY}"
+    secret_key: "${ZEROG_STORAGE_SECRET_KEY}"
+    bucket: "stack-platform"
+  compute:
+    endpoint: "https://compute.0g.ai"
+    api_key: "${ZEROG_COMPUTE_API_KEY}"
+    model: "gpt-4"
+
+# Circle Integration
+circle:
+  api_key: "${CIRCLE_API_KEY}"
+  base_url: "https://api.circle.com"
 ```
 
 ## 🚀 Deployment
@@ -269,6 +398,9 @@ docker build -t stack_service:latest .
 docker run -p 8080:8080 \
   -e DATABASE_URL="postgres://..." \
   -e JWT_SECRET="..." \
+  -e CIRCLE_API_KEY="..." \
+  -e ZEROG_STORAGE_ACCESS_KEY="..." \
+  -e ZEROG_COMPUTE_API_KEY="..." \
   stack_service:latest
 ```
 
@@ -305,6 +437,7 @@ The application is cloud-ready and can be deployed on:
 - Database connection metrics
 - Business metrics (transactions, users, etc.)
 - Custom application metrics
+- 0G storage and compute metrics
 
 ### Monitoring Stack
 - **Prometheus**: Metrics collection
@@ -345,10 +478,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🛣️ Roadmap
 
-### Phase 1 (Current)
+### Phase 1 (Current - MVP)
 - [x] Basic authentication and user management
 - [x] Multi-chain wallet integration
 - [x] Investment baskets foundation
+- [x] AI CFO implementation (MVP)
 - [ ] Copy trading implementation
 - [ ] Debit card integration
 
