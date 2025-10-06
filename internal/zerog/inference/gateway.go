@@ -397,20 +397,24 @@ func (g *Gateway) storeArtifact(ctx context.Context, userID uuid.UUID, taskType,
 		"content_type": "text/markdown",
 	}
 
-	// Store in the AI artifacts namespace
-	result, err := g.storageClient.Store(ctx, entities.NamespaceAIArtifacts, []byte(content), metadata)
+	// Store in the AI artifacts using the actual storage client interface
+	storageID, err := g.storageClient.Store(ctx, []byte(content), metadata)
 	if err != nil {
 		return "", fmt.Errorf("failed to store artifact: %w", err)
 	}
 
+	// Create URI from storage ID and namespace
+	artifactURI := fmt.Sprintf("0g://%s/%s", entities.NamespaceAIArtifacts, storageID)
+
 	g.logger.Debug("Artifact stored successfully",
 		zap.String("user_id", userID.String()),
 		zap.String("task_type", taskType),
-		zap.String("uri", result.URI),
-		zap.Int64("size", result.Size),
+		zap.String("storage_id", storageID),
+		zap.String("artifact_uri", artifactURI),
+		zap.Int("content_size", len(content)),
 	)
 
-	return result.URI, nil
+	return artifactURI, nil
 }
 
 // GetMetrics returns gateway operational metrics

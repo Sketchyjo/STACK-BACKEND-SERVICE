@@ -217,29 +217,21 @@ func (c *Client) GenerateInference(ctx context.Context, request *InferenceReques
 	var response *InferenceResponse
 
 	// Retry logic with exponential backoff
-	retryConfig := &retry.Config{
-		MaxRetries: c.config.MaxRetries,
-		BaseDelay:  time.Second,
-		MaxDelay:   30 * time.Second,
-		Multiplier: 2.0,
+	retryConfig := retry.RetryConfig{
+		MaxAttempts: c.config.MaxRetries,
+		BaseDelay:   time.Second,
+		MaxDelay:    30 * time.Second,
+		Multiplier:  2.0,
 	}
 
-	err := retry.ExecuteWithRetry(ctx, retryConfig, func() error {
+	err := retry.WithExponentialBackoff(ctx, retryConfig, func() error {
 		var err error
 		response, err = c.doInferenceRequest(ctx, request)
 		if err != nil {
 			lastErr = err
-			if isRetryableError(err) {
-				c.logger.Warn("Inference request failed, retrying",
-					zap.Error(err),
-					zap.String("model", request.Model),
-				)
-				return err
-			}
-			return retry.NonRetryableError(err)
 		}
-		return nil
-	})
+		return err
+	}, isRetryableError)
 
 	duration := time.Since(startTime)
 	c.metrics.RequestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(

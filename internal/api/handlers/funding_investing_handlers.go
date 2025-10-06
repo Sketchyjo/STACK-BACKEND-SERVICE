@@ -44,6 +44,34 @@ func NewInvestingHandlers(investingService *investing.Service, logger *logger.Lo
 	}
 }
 
+// IsWebhookRetryableError determines if a webhook processing error should be retried
+func IsWebhookRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	
+	errorMsg := err.Error()
+	
+	// Don't retry client errors or validation errors
+	if strings.Contains(errorMsg, "invalid") || 
+		 strings.Contains(errorMsg, "malformed") ||
+		 strings.Contains(errorMsg, "already processed") ||
+		 strings.Contains(errorMsg, "duplicate") {
+		return false
+	}
+	
+	// Retry on temporary failures
+	if strings.Contains(errorMsg, "timeout") ||
+		 strings.Contains(errorMsg, "connection") ||
+		 strings.Contains(errorMsg, "temporary") ||
+		 strings.Contains(errorMsg, "unavailable") {
+		return true
+	}
+	
+	// By default, retry server errors (5xx equivalent)
+	return true
+}
+
 // === Funding Handlers ===
 
 // CreateDepositAddress creates a deposit address for a specific chain

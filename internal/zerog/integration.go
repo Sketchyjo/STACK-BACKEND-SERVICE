@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 	"github.com/stack-service/stack_service/internal/api/handlers"
 	"github.com/stack-service/stack_service/internal/api/routes"
@@ -17,6 +18,36 @@ import (
 	"github.com/stack-service/stack_service/internal/infrastructure/zerog"
 	"go.uber.org/zap"
 )
+
+// AISummaryRepositoryAdapter adapts the repositories.AISummaryRepository to services.AISummariesRepository
+type AISummaryRepositoryAdapter struct {
+	repo repositories.AISummaryRepository
+}
+
+// CreateSummary adapts the Create method
+func (a *AISummaryRepositoryAdapter) CreateSummary(ctx context.Context, summary *services.AISummary) error {
+	return a.repo.Create(ctx, summary)
+}
+
+// GetLatestSummary adapts the GetLatestByUserID method
+func (a *AISummaryRepositoryAdapter) GetLatestSummary(ctx context.Context, userID uuid.UUID) (*services.AISummary, error) {
+	return a.repo.GetLatestByUserID(ctx, userID)
+}
+
+// GetSummaryByWeek adapts the GetByUserAndWeek method
+func (a *AISummaryRepositoryAdapter) GetSummaryByWeek(ctx context.Context, userID uuid.UUID, weekStart time.Time) (*services.AISummary, error) {
+	return a.repo.GetByUserAndWeek(ctx, userID, weekStart)
+}
+
+// UpdateSummary adapts the Update method
+func (a *AISummaryRepositoryAdapter) UpdateSummary(ctx context.Context, summary *services.AISummary) error {
+	return a.repo.Update(ctx, summary)
+}
+
+// NewAISummaryRepositoryAdapter creates a new adapter
+func NewAISummaryRepositoryAdapter(repo repositories.AISummaryRepository) *AISummaryRepositoryAdapter {
+	return &AISummaryRepositoryAdapter{repo: repo}
+}
 
 // ZeroGIntegration manages all 0G-related services and components
 type ZeroGIntegration struct {
@@ -126,20 +157,27 @@ func (z *ZeroGIntegration) initialize(
 	}
 	z.inferenceGateway = inferenceGateway
 
+	// Create a placeholder notification service
+	// In a real implementation, this would be properly injected
+	notificationService := &services.NotificationService{}
+
+	// Create adapter for AI summary repository
+	aiSummaryRepoAdapter := NewAISummaryRepositoryAdapter(aiSummaryRepo)
+
 	// Initialize AI-CFO service
 	// Note: Using the correct repository interfaces and parameters
-	// The repository interfaces don't match exactly, so we'll need to adapt them
 	aicfoService, err := services.NewAICfoService(
 		inferenceGateway,
 		storageClient,
 		namespaceManager,
+		notificationService,
 		// Using nil for repositories that don't match the interface
 		nil, // portfolioRepo - interface mismatch
 		nil, // positionsRepo - not available
 		nil, // balanceRepo - not available
-		// Using nil for repositories that don't match the interface
-		nil, // aiSummaryRepo - interface mismatch
-		nil, // userRepo - not available
+		// Using the adapter for aiSummaryRepo
+		aiSummaryRepoAdapter, // aiSummaryRepo - using adapter
+		nil,                  // userRepo - not available
 		z.logger,
 	)
 	if err != nil {

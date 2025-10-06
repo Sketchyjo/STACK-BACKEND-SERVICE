@@ -20,9 +20,10 @@ import (
 
 // AICfoService provides AI-powered CFO functionality
 type AICfoService struct {
-	inferenceGateway  entities.ZeroGInferenceGateway
-	storageClient     entities.ZeroGStorageClient
-	namespaceManager  *zerog.NamespaceManager
+	inferenceGateway   entities.ZeroGInferenceGateway
+	storageClient      entities.ZeroGStorageClient
+	namespaceManager   *zerog.NamespaceManager
+	notificationService *NotificationService
 	
 	// Repositories for data access
 	portfolioRepo     PortfolioRepository
@@ -105,6 +106,7 @@ func NewAICfoService(
 	inferenceGateway entities.ZeroGInferenceGateway,
 	storageClient entities.ZeroGStorageClient,
 	namespaceManager *zerog.NamespaceManager,
+	notificationService *NotificationService,
 	portfolioRepo PortfolioRepository,
 	positionsRepo PositionsRepository,
 	balanceRepo BalanceRepository,
@@ -123,17 +125,18 @@ func NewAICfoService(
 	}
 
 	service := &AICfoService{
-		inferenceGateway: inferenceGateway,
-		storageClient:    storageClient,
-		namespaceManager: namespaceManager,
-		portfolioRepo:    portfolioRepo,
-		positionsRepo:    positionsRepo,
-		balanceRepo:      balanceRepo,
-		aiSummariesRepo:  aiSummariesRepo,
-		userRepo:         userRepo,
-		logger:           logger,
-		tracer:           tracer,
-		metrics:          metrics,
+		inferenceGateway:   inferenceGateway,
+		storageClient:      storageClient,
+		namespaceManager:   namespaceManager,
+		notificationService: notificationService,
+		portfolioRepo:      portfolioRepo,
+		positionsRepo:      positionsRepo,
+		balanceRepo:        balanceRepo,
+		aiSummariesRepo:    aiSummariesRepo,
+		userRepo:           userRepo,
+		logger:             logger,
+		tracer:             tracer,
+		metrics:            metrics,
 	}
 
 	logger.Info("AI-CFO service initialized successfully")
@@ -238,6 +241,14 @@ func (s *AICfoService) GenerateWeeklySummary(ctx context.Context, userID uuid.UU
 	if err := s.storeSummaryInStorage(ctx, summary, result); err != nil {
 		s.logger.Warn("Failed to store summary in 0G storage", zap.Error(err))
 		// Don't fail the entire operation
+	}
+
+	// Send notification to user if notification service is available
+	if s.notificationService != nil {
+		if err := s.sendWeeklySummaryNotification(ctx, userID, summary); err != nil {
+			s.logger.Warn("Failed to send weekly summary notification", zap.Error(err))
+			// Don't fail the entire operation
+		}
 	}
 
 	// Record success metrics
@@ -631,6 +642,62 @@ func (s *AICfoService) GetHealthStatus(ctx context.Context) (*entities.HealthSta
 		LastChecked: time.Now(),
 		Errors:      errors,
 	}, nil
+}
+
+// sendWeeklySummaryNotification sends a notification for a new weekly summary
+func (s *AICfoService) sendWeeklySummaryNotification(ctx context.Context, userID uuid.UUID, summary *AISummary) error {
+	ctx, span := s.tracer.Start(ctx, "aicfo.send_notification")
+	defer span.End()
+
+	// Get user preferences to check if notifications are enabled
+	preferences, err := s.userRepo.GetUserPreferences(ctx, userID)
+	if err != nil {
+		s.logger.Debug("Failed to get user preferences for notification, using defaults", zap.Error(err))
+		preferences = s.getDefaultPreferences()
+	}
+
+	// Check if weekly summary notifications are enabled
+	if !preferences.NotificationSettings["weekly_summaries"] {
+		s.logger.Debug("Weekly summary notifications disabled for user",
+			zap.String("user_id", userID.String()),
+		)
+		return nil
+	}
+
+	// For now, we'll use a placeholder email since we don't have user email in the current context
+	// In a real implementation, this would come from the user repository
+	userEmail := fmt.Sprintf("user+%s@example.com", userID.String()[:8])
+
+	notification := &WeeklySummaryNotification{
+		UserID:      userID,
+		Email:       userEmail,
+		WeekStart:   summary.WeekStart,
+		WeekEnd:     summary.WeekStart.AddDate(0, 0, 6),
+		SummaryID:   summary.ID,
+		SummaryMD:   summary.SummaryMD,
+		ArtifactURI: summary.ArtifactURI,
+	}
+
+	// Send email notification
+	if err := s.notificationService.SendWeeklySummaryNotification(ctx, notification); err != nil {
+		return fmt.Errorf("failed to send email notification: %w", err)
+	}
+
+	// Send push notification as well
+	title := fmt.Sprintf("Weekly Summary Ready - %s", summary.WeekStart.Format("Jan 2, 2006"))
+	body := "Your AI-powered portfolio analysis is now available. View insights on performance, risk, and allocation."
+	if err := s.notificationService.SendPushNotification(ctx, userID, title, body); err != nil {
+		s.logger.Warn("Failed to send push notification", zap.Error(err))
+		// Don't fail for push notification errors
+	}
+
+	s.logger.Info("Weekly summary notifications sent successfully",
+		zap.String("user_id", userID.String()),
+		zap.String("summary_id", summary.ID.String()),
+		zap.String("week_start", summary.WeekStart.Format("2006-01-02")),
+	)
+
+	return nil
 }
 
 // initAICfoMetrics initializes OpenTelemetry metrics for the AI-CFO service
