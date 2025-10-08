@@ -41,6 +41,15 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 	onboardingHandlers := handlers.NewOnboardingHandlers(container.GetOnboardingService(), container.ZapLog)
 	walletHandlers := handlers.NewWalletHandlers(container.GetWalletService(), container.ZapLog)
 
+	// Initialize AI-CFO and ZeroG handlers
+	aicfoHandlers := handlers.NewAICfoHandler(container.GetAICfoService(), container.ZapLog)
+	zeroGHandlers := handlers.NewZeroGHandler(
+		container.GetStorageClient(),
+		container.GetInferenceGateway(),
+		container.GetNamespaceManager(),
+		container.ZapLog,
+	)
+
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
@@ -218,6 +227,9 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 			webhooks.POST("/cards", handlers.CardWebhook(container.DB, container.Config, container.Logger))
 		}
 	}
+
+	// Setup ZeroG and AI routes
+	SetupZeroGRoutes(router, zeroGHandlers, aicfoHandlers, container.ZapLog)
 
 	return router
 }

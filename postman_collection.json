@@ -108,6 +108,63 @@
       ]
     },
     {
+      "name": "Funding",
+      "item": [
+        { 
+          "name": "Create Deposit Address", 
+          "request": { 
+            "method": "POST", 
+            "header": [ 
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { 
+              "mode": "raw", 
+              "raw": "{\n  \"chain\": \"ETH\"\n}" 
+            },
+            "url": { 
+              "raw": "{{base_url}}/api/v1/funding/deposit/address", 
+              "host": ["{{base_url}}"], 
+              "path": ["api","v1","funding","deposit","address"] 
+            } 
+          } 
+        },
+        { 
+          "name": "Get Funding Confirmations", 
+          "request": { 
+            "method": "GET", 
+            "header": [ 
+              { "key": "Authorization", "value": "Bearer {{token}}" } 
+            ],
+            "url": { 
+              "raw": "{{base_url}}/api/v1/funding/confirmations", 
+              "host": ["{{base_url}}"], 
+              "path": ["api","v1","funding","confirmations"] 
+            } 
+          } 
+        }
+      ]
+    },
+    {
+      "name": "Balances",
+      "item": [
+        { 
+          "name": "Get Balances", 
+          "request": { 
+            "method": "GET", 
+            "header": [ 
+              { "key": "Authorization", "value": "Bearer {{token}}" } 
+            ],
+            "url": { 
+              "raw": "{{base_url}}/api/v1/balances", 
+              "host": ["{{base_url}}"], 
+              "path": ["api","v1","balances"] 
+            } 
+          } 
+        }
+      ]
+    },
+    {
       "name": "Baskets",
       "item": [
         { "name": "List", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/baskets/", "host": ["{{base_url}}"], "path": ["api","v1","baskets",""] } } },
@@ -200,7 +257,31 @@
       "item": [
         { "name": "Payment", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"id\": \"pay_123\",\n  \"amount\": 100.00,\n  \"currency\": \"USD\",\n  \"status\": \"completed\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/payment", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","payment"] } } },
         { "name": "Blockchain", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"txid\": \"0xabc123\",\n  \"confirmations\": 3,\n  \"status\": \"confirmed\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/blockchain", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","blockchain"] } } },
-        { "name": "Cards", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"card_id\": \"card_123\",\n  \"event\": \"activated\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/cards", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","cards"] } } }
+        { "name": "Cards", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"card_id\": \"card_123\",\n  \"event\": \"activated\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/cards", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","cards"] } } },
+        { "name": "Chain Deposit", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"txid\": \"0xabc123\",\n  \"address\": \"0x123abc\",\n  \"amount\": \"0.5\",\n  \"asset\": \"ETH\",\n  \"confirmations\": 12,\n  \"status\": \"confirmed\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/chain-deposit", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","chain-deposit"] } } },
+        { "name": "Brokerage Fill", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"order_id\": \"order_123\",\n  \"status\": \"filled\",\n  \"fill_price\": 35000.00,\n  \"fill_quantity\": 0.1,\n  \"timestamp\": \"2023-06-15T14:30:00Z\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/brokerage-fills", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","brokerage-fills"] } } }
+      ]
+    },
+    {
+      "name": "AI",
+      "item": [
+        { "name": "Get Latest Summary", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/ai/summary/latest", "host": ["{{base_url}}"], "path": ["api","v1","ai","summary","latest"] } } },
+        { "name": "Analyze On Demand", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"portfolio_id\": \"portfolio_123\",\n  \"analysis_type\": \"risk\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/ai/analyze", "host": ["{{base_url}}"], "path": ["api","v1","ai","analyze"] } } },
+        { "name": "Health", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/ai/health", "host": ["{{base_url}}"], "path": ["api","v1","ai","health"] } } }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        { "name": "Create Order", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"asset\": \"BTC\",\n  \"side\": \"buy\",\n  \"quantity\": 0.1,\n  \"order_type\": \"market\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/orders", "host": ["{{base_url}}"], "path": ["api","v1","orders"] } } },
+        { "name": "List Orders", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/orders", "host": ["{{base_url}}"], "path": ["api","v1","orders"] } } },
+        { "name": "Get Order", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/orders/{{order_id}}", "host": ["{{base_url}}"], "path": ["api","v1","orders","{{order_id}}"] } } }
+      ]
+    },
+    {
+      "name": "Portfolio",
+      "item": [
+        { "name": "Get Portfolio", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/portfolio", "host": ["{{base_url}}"], "path": ["api","v1","portfolio"] } } }
       ]
     }
   ]

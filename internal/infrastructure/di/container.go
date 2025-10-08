@@ -1,9 +1,14 @@
 package di
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
+	"github.com/google/uuid"
+	domainrepos "github.com/stack-service/stack_service/internal/domain/repositories"
+	"github.com/stack-service/stack_service/internal/domain/services"
 	"github.com/stack-service/stack_service/internal/domain/services/funding"
 	"github.com/stack-service/stack_service/internal/domain/services/investing"
 	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
@@ -12,9 +17,31 @@ import (
 	"github.com/stack-service/stack_service/internal/infrastructure/circle"
 	"github.com/stack-service/stack_service/internal/infrastructure/config"
 	"github.com/stack-service/stack_service/internal/infrastructure/repositories"
+	"github.com/stack-service/stack_service/internal/infrastructure/zerog"
 	"github.com/stack-service/stack_service/pkg/logger"
 	"go.uber.org/zap"
 )
+
+// AISummariesRepositoryAdapter adapts the domain repository to the service interface
+type AISummariesRepositoryAdapter struct {
+	repo domainrepos.AISummaryRepository
+}
+
+func (a *AISummariesRepositoryAdapter) CreateSummary(ctx context.Context, summary *services.AISummary) error {
+	return a.repo.Create(ctx, summary)
+}
+
+func (a *AISummariesRepositoryAdapter) GetLatestSummary(ctx context.Context, userID uuid.UUID) (*services.AISummary, error) {
+	return a.repo.GetLatestByUserID(ctx, userID)
+}
+
+func (a *AISummariesRepositoryAdapter) GetSummaryByWeek(ctx context.Context, userID uuid.UUID, weekStart time.Time) (*services.AISummary, error) {
+	return a.repo.GetByUserAndWeek(ctx, userID, weekStart)
+}
+
+func (a *AISummariesRepositoryAdapter) UpdateSummary(ctx context.Context, summary *services.AISummary) error {
+	return a.repo.Update(ctx, summary)
+}
 
 // Container holds all application dependencies
 type Container struct {
@@ -45,6 +72,15 @@ type Container struct {
 	WalletService     *wallet.Service
 	FundingService    *funding.Service
 	InvestingService  *investing.Service
+	AICfoService      *services.AICfoService
+
+	// ZeroG Services
+	InferenceGateway  *zerog.InferenceGateway
+	StorageClient     *zerog.StorageClient
+	NamespaceManager  *zerog.NamespaceManager
+
+	// Additional Repositories for AI-CFO
+	AISummariesRepo   domainrepos.AISummaryRepository
 
 	// Workers
 	WalletProvisioningScheduler interface{} // Type interface{} to avoid circular dependency, will be set at runtime
@@ -65,6 +101,7 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 	depositRepo := repositories.NewDepositRepository(db, zapLog)
 	balanceRepo := repositories.NewBalanceRepository(db, zapLog)
 	fundingEventJobRepo := repositories.NewFundingEventJobRepository(db, log)
+	aiSummariesRepo := repositories.NewAISummaryRepository(db, zapLog)
 
 	// Initialize external services
 	circleConfig := circle.Config{
@@ -96,6 +133,19 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 
 	auditService := adapters.NewAuditService(db, zapLog)
 
+	// Initialize ZeroG services
+	storageClient, err := zerog.NewStorageClient(&cfg.ZeroG.Storage, zapLog)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize ZeroG storage client: %w", err)
+	}
+
+	inferenceGateway, err := zerog.NewInferenceGateway(&cfg.ZeroG.Compute, storageClient, zapLog)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize ZeroG inference gateway: %w", err)
+	}
+
+	namespaceManager := zerog.NewNamespaceManager(storageClient, &cfg.ZeroG.Storage.Namespaces, zapLog)
+
 	container := &Container{
 		Config: cfg,
 		DB:     db,
@@ -112,12 +162,18 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 		DepositRepo:               depositRepo,
 		BalanceRepo:               balanceRepo,
 		FundingEventJobRepo:       fundingEventJobRepo,
+		AISummariesRepo:           aiSummariesRepo,
 
 		// External Services
 		CircleClient: circleClient,
 		KYCProvider:  kycProvider,
 		EmailService: emailService,
 		AuditService: auditService,
+
+		// ZeroG Services
+		InferenceGateway: inferenceGateway,
+		StorageClient:    storageClient,
+		NamespaceManager: namespaceManager,
 	}
 
 	// Initialize domain services with their dependencies
@@ -168,6 +224,33 @@ func (c *Container) initializeDomainServices() error {
 	// TODO: Wire up investing service dependencies when implemented
 	c.InvestingService = nil
 
+	// Initialize notification service for AI-CFO
+	notificationService, err := services.NewNotificationService(c.EmailService, c.ZapLog)
+	if err != nil {
+		return fmt.Errorf("failed to initialize notification service: %w", err)
+	}
+
+	// Create repository adapter for AI-CFO service
+	aiSummariesAdapter := &AISummariesRepositoryAdapter{repo: c.AISummariesRepo}
+
+	// Initialize AI-CFO service
+	aicfoService, err := services.NewAICfoService(
+		c.InferenceGateway,
+		c.StorageClient,
+		c.NamespaceManager,
+		notificationService,
+		nil, // portfolioRepo - TODO: implement when available
+		nil, // positionsRepo - TODO: implement when available
+		nil, // balanceRepo - TODO: implement GetUserBalance method
+		aiSummariesAdapter,
+		nil, // userRepo - TODO: implement GetUserPreferences method
+		c.ZapLog,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize AI-CFO service: %w", err)
+	}
+	c.AICfoService = aicfoService
+
 	return nil
 }
 
@@ -189,4 +272,24 @@ func (c *Container) GetFundingService() *funding.Service {
 // GetInvestingService returns the investing service
 func (c *Container) GetInvestingService() *investing.Service {
 	return c.InvestingService
+}
+
+// GetAICfoService returns the AI-CFO service
+func (c *Container) GetAICfoService() *services.AICfoService {
+	return c.AICfoService
+}
+
+// GetInferenceGateway returns the ZeroG inference gateway
+func (c *Container) GetInferenceGateway() *zerog.InferenceGateway {
+	return c.InferenceGateway
+}
+
+// GetStorageClient returns the ZeroG storage client
+func (c *Container) GetStorageClient() *zerog.StorageClient {
+	return c.StorageClient
+}
+
+// GetNamespaceManager returns the ZeroG namespace manager
+func (c *Container) GetNamespaceManager() *zerog.NamespaceManager {
+	return c.NamespaceManager
 }
