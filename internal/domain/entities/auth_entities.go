@@ -75,6 +75,48 @@ type ChangePasswordRequest struct {
 	NewPassword     string `json:"newPassword" validate:"required,min=8"`
 }
 
+// SignUpRequest represents a user signup request with email OR phone
+type SignUpRequest struct {
+	Email    *string `json:"email,omitempty" validate:"omitempty,email"`
+	Phone    *string `json:"phone,omitempty" validate:"omitempty,e164"`
+	Password string  `json:"password" validate:"required,min=8"`
+}
+
+// VerifyCodeRequest represents a verification code request
+type VerifyCodeRequest struct {
+	Email *string `json:"email,omitempty" validate:"omitempty,email"`
+	Phone *string `json:"phone,omitempty" validate:"omitempty,e164"`
+	Code  string  `json:"code" validate:"required,len=6"`
+}
+
+// ResendCodeRequest represents a resend verification code request
+type ResendCodeRequest struct {
+	Email *string `json:"email,omitempty" validate:"omitempty,email"`
+	Phone *string `json:"phone,omitempty" validate:"omitempty,e164"`
+}
+
+// VerificationCodeData represents verification code data stored in Redis
+type VerificationCodeData struct {
+	Code      string    `json:"code"`
+	Attempts  int       `json:"attempts"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// SignUpResponse represents the response after successful signup
+type SignUpResponse struct {
+	Message    string `json:"message"`
+	Identifier string `json:"identifier"`
+}
+
+// VerifyCodeResponse represents the response after successful verification
+type VerifyCodeResponse struct {
+	User         *UserInfo `json:"user"`
+	AccessToken  string    `json:"accessToken"`
+	RefreshToken string    `json:"refreshToken"`
+	ExpiresAt    time.Time `json:"expiresAt"`
+}
+
 // User represents a complete user entity for database operations
 type User struct {
 	ID                 uuid.UUID        `json:"id" db:"id"`
@@ -126,6 +168,7 @@ func (u *User) ToUserProfile() *UserProfile {
 		KYCSubmittedAt:     u.KYCSubmittedAt,
 		KYCApprovedAt:      u.KYCApprovedAt,
 		KYCRejectionReason: u.KYCRejectionReason,
+		IsActive:           u.IsActive,
 		CreatedAt:          u.CreatedAt,
 		UpdatedAt:          u.UpdatedAt,
 	}

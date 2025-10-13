@@ -45,6 +45,24 @@
           }
         },
         {
+          "name": "Verify Code",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"alice@example.com\",\n  \"code\": \"123456\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/verify-code", "host": ["{{base_url}}"], "path": ["api","v1","auth","verify-code"] }
+          }
+        },
+        {
+          "name": "Resend Code",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"alice@example.com\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/resend-code", "host": ["{{base_url}}"], "path": ["api","v1","auth","resend-code"] }
+          }
+        },
+        {
           "name": "Login",
           "request": {
             "method": "POST",
@@ -259,7 +277,7 @@
         { "name": "Blockchain", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"txid\": \"0xabc123\",\n  \"confirmations\": 3,\n  \"status\": \"confirmed\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/blockchain", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","blockchain"] } } },
         { "name": "Cards", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"card_id\": \"card_123\",\n  \"event\": \"activated\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/cards", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","cards"] } } },
         { "name": "Chain Deposit", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"txid\": \"0xabc123\",\n  \"address\": \"0x123abc\",\n  \"amount\": \"0.5\",\n  \"asset\": \"ETH\",\n  \"confirmations\": 12,\n  \"status\": \"confirmed\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/chain-deposit", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","chain-deposit"] } } },
-        { "name": "Brokerage Fill", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"order_id\": \"order_123\",\n  \"status\": \"filled\",\n  \"fill_price\": 35000.00,\n  \"fill_quantity\": 0.1,\n  \"timestamp\": \"2023-06-15T14:30:00Z\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/brokerage-fills", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","brokerage-fills"] } } }
+        { "name": "Brokerage Fill", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"status\": \"filled\",\n  \"fills\": [\n    {\n      \"symbol\": \"BTC\",\n      \"quantity\": \"0.1\",\n      \"price\": \"35000.00\"\n    }\n  ],\n  \"signature\": \"abc123signature\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/brokerage-fills", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","brokerage-fills"] } } }
       ]
     },
     {

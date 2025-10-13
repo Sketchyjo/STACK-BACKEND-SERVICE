@@ -166,7 +166,7 @@ func (r *AuthRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*entiti
 		       kyc_provider_ref, kyc_submitted_at, kyc_approved_at, kyc_rejection_reason,
 		       role, is_active, last_login_at, created_at, updated_at
 		FROM users 
-		WHERE id = $1 AND is_active = true`
+		WHERE id = $1`
 
 	user := &entities.User{}
 	var kycSubmittedAt, kycApprovedAt, lastLoginAt sql.NullTime

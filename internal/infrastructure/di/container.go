@@ -14,6 +14,7 @@ import (
 	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
 	"github.com/stack-service/stack_service/internal/domain/services/wallet"
 	"github.com/stack-service/stack_service/internal/infrastructure/adapters"
+	"github.com/stack-service/stack_service/internal/infrastructure/cache"
 	"github.com/stack-service/stack_service/internal/infrastructure/circle"
 	"github.com/stack-service/stack_service/internal/infrastructure/config"
 	"github.com/stack-service/stack_service/internal/infrastructure/repositories"
@@ -65,22 +66,27 @@ type Container struct {
 	CircleClient *circle.Client
 	KYCProvider  *adapters.KYCProvider
 	EmailService *adapters.EmailService
+	SMSService   *adapters.SMSService
 	AuditService *adapters.AuditService
+	RedisClient  cache.RedisClient
 
 	// Domain Services
-	OnboardingService *onboarding.Service
-	WalletService     *wallet.Service
-	FundingService    *funding.Service
-	InvestingService  *investing.Service
-	AICfoService      *services.AICfoService
+	OnboardingService    *onboarding.Service
+	OnboardingJobService *services.OnboardingJobService
+	VerificationService  services.VerificationService
+	WalletService        *wallet.Service
+	FundingService       *funding.Service
+	InvestingService     *investing.Service
+	AICfoService         *services.AICfoService
 
 	// ZeroG Services
-	InferenceGateway  *zerog.InferenceGateway
-	StorageClient     *zerog.StorageClient
-	NamespaceManager  *zerog.NamespaceManager
+	InferenceGateway *zerog.InferenceGateway
+	StorageClient    *zerog.StorageClient
+	NamespaceManager *zerog.NamespaceManager
 
 	// Additional Repositories for AI-CFO
 	AISummariesRepo   domainrepos.AISummaryRepository
+	OnboardingJobRepo *repositories.OnboardingJobRepository
 
 	// Workers
 	WalletProvisioningScheduler interface{} // Type interface{} to avoid circular dependency, will be set at runtime
@@ -102,6 +108,7 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 	balanceRepo := repositories.NewBalanceRepository(db, zapLog)
 	fundingEventJobRepo := repositories.NewFundingEventJobRepository(db, log)
 	aiSummariesRepo := repositories.NewAISummaryRepository(db, zapLog)
+	onboardingJobRepo := repositories.NewOnboardingJobRepository(db, zapLog)
 
 	// Initialize external services
 	circleConfig := circle.Config{
@@ -130,6 +137,21 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 		BaseURL:     cfg.Email.BaseURL,
 	}
 	emailService := adapters.NewEmailService(zapLog, emailServiceConfig)
+
+	// Initialize SMS service
+	smsService := adapters.NewSMSService(zapLog, adapters.SMSConfig{
+		Provider:    cfg.SMS.Provider,
+		APIKey:      cfg.SMS.APIKey,
+		APISecret:   cfg.SMS.APISecret,
+		FromNumber:  cfg.SMS.FromNumber,
+		Environment: cfg.SMS.Environment,
+	})
+
+	// Initialize Redis client
+	redisClient, err := cache.NewRedisClient(&cfg.Redis, zapLog)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Redis client: %w", err)
+	}
 
 	auditService := adapters.NewAuditService(db, zapLog)
 
@@ -163,12 +185,15 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 		BalanceRepo:               balanceRepo,
 		FundingEventJobRepo:       fundingEventJobRepo,
 		AISummariesRepo:           aiSummariesRepo,
+		OnboardingJobRepo:         onboardingJobRepo,
 
 		// External Services
 		CircleClient: circleClient,
 		KYCProvider:  kycProvider,
 		EmailService: emailService,
+		SMSService:   smsService,
 		AuditService: auditService,
+		RedisClient:  redisClient,
 
 		// ZeroG Services
 		InferenceGateway: inferenceGateway,
@@ -180,6 +205,17 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 	if err := container.initializeDomainServices(); err != nil {
 		return nil, fmt.Errorf("failed to initialize domain services: %w", err)
 	}
+
+	// Initialize verification and onboarding job services
+	container.VerificationService = services.NewVerificationService(
+		container.RedisClient,
+		*container.EmailService,
+		*container.SMSService,
+		container.ZapLog,
+		container.Config,
+	)
+
+	container.OnboardingJobService = services.NewOnboardingJobService(container.OnboardingJobRepo, container.ZapLog)
 
 	return container, nil
 }
@@ -292,4 +328,14 @@ func (c *Container) GetStorageClient() *zerog.StorageClient {
 // GetNamespaceManager returns the ZeroG namespace manager
 func (c *Container) GetNamespaceManager() *zerog.NamespaceManager {
 	return c.NamespaceManager
+}
+
+// GetVerificationService returns the verification service
+func (c *Container) GetVerificationService() services.VerificationService {
+	return c.VerificationService
+}
+
+// GetOnboardingJobService returns the onboarding job service
+func (c *Container) GetOnboardingJobService() *services.OnboardingJobService {
+	return c.OnboardingJobService
 }

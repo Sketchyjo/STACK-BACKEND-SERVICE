@@ -117,6 +117,7 @@ type UserProfile struct {
 	KYCSubmittedAt     *time.Time       `json:"kyc_submitted_at" db:"kyc_submitted_at"`
 	KYCApprovedAt      *time.Time       `json:"kyc_approved_at" db:"kyc_approved_at"`
 	KYCRejectionReason *string          `json:"kyc_rejection_reason" db:"kyc_rejection_reason"`
+	IsActive           bool             `json:"is_active" db:"is_active"`
 	CreatedAt          time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt          time.Time        `json:"updated_at" db:"updated_at"`
 }

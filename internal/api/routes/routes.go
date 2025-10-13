@@ -5,6 +5,7 @@ import (
 
 	"github.com/stack-service/stack_service/internal/api/handlers"
 	"github.com/stack-service/stack_service/internal/api/middleware"
+
 	// "github.com/stack-service/stack_service/internal/infrastructure/config"
 	"github.com/stack-service/stack_service/internal/infrastructure/di"
 	// "github.com/stack-service/stack_service/pkg/logger"
@@ -56,7 +57,20 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 		// Authentication routes (no auth required)
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/register", handlers.Register(container.DB, container.Config, container.Logger))
+
+			// New signup flow with verification
+			authSignupHandlers := handlers.NewAuthSignupHandlers(
+				container.DB,
+				container.Config,
+				container.ZapLog,
+				*container.UserRepo,
+				container.GetVerificationService(),
+				*container.GetOnboardingJobService(),
+			)
+			auth.POST("/register", authSignupHandlers.Register)
+			auth.POST("/verify-code", authSignupHandlers.VerifyCode)
+			auth.POST("/resend-code", authSignupHandlers.ResendCode)
+
 			auth.POST("/login", handlers.Login(container.DB, container.Config, container.Logger))
 			auth.POST("/refresh", handlers.RefreshToken(container.DB, container.Config, container.Logger))
 			auth.POST("/logout", handlers.Logout(container.DB, container.Config, container.Logger))
@@ -64,7 +78,7 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 			auth.POST("/reset-password", handlers.ResetPassword(container.DB, container.Config, container.Logger))
 			auth.POST("/verify-email", handlers.VerifyEmail(container.DB, container.Config, container.Logger))
 		}
-
+  
 		// Onboarding routes - OpenAPI spec compliant
 		onboarding := v1.Group("/onboarding")
 		onboarding.Use(middleware.MockAuthMiddleware()) // Use mock auth for development

@@ -24,13 +24,13 @@ type Service struct {
 
 // Repository interfaces
 type UserRepository interface {
-	Create(ctx context.Context, user *entities.UserProfile) error
-	GetByID(ctx context.Context, id uuid.UUID) (*entities.UserProfile, error)
-	GetByEmail(ctx context.Context, email string) (*entities.UserProfile, error)
-	GetByAuthProviderID(ctx context.Context, authProviderID string) (*entities.UserProfile, error)
-	Update(ctx context.Context, user *entities.UserProfile) error
-	UpdateOnboardingStatus(ctx context.Context, userID uuid.UUID, status entities.OnboardingStatus) error
-	UpdateKYCStatus(ctx context.Context, userID uuid.UUID, status string, approvedAt *time.Time, rejectionReason *string) error
+    Create(ctx context.Context, user *entities.UserProfile) error
+    GetByID(ctx context.Context, id uuid.UUID) (*entities.UserProfile, error)
+    GetByEmail(ctx context.Context, email string) (*entities.UserProfile, error)
+    GetByAuthProviderID(ctx context.Context, authProviderID string) (*entities.UserProfile, error)
+    Update(ctx context.Context, user *entities.UserProfile) error
+    UpdateOnboardingStatus(ctx context.Context, userID uuid.UUID, status entities.OnboardingStatus) error
+    UpdateKYCStatus(ctx context.Context, userID uuid.UUID, status string, approvedAt *time.Time, rejectionReason *string) error
 }
 
 type OnboardingFlowRepository interface {
@@ -96,22 +96,22 @@ func NewService(
 
 // StartOnboarding initiates the onboarding process for a new user
 func (s *Service) StartOnboarding(ctx context.Context, req *entities.OnboardingStartRequest) (*entities.OnboardingStartResponse, error) {
-	s.logger.Info("Starting onboarding process", zap.String("email", req.Email))
+    s.logger.Info("Starting onboarding process", zap.String("email", req.Email))
 
-	// Check if user already exists
-	existingUser, err := s.userRepo.GetByEmail(ctx, req.Email)
-	if err == nil && existingUser != nil {
-		s.logger.Info("User already exists, returning existing onboarding status",
-			zap.String("email", req.Email),
-			zap.String("userId", existingUser.ID.String()),
-			zap.String("status", string(existingUser.OnboardingStatus)))
+    // Check if user already exists
+    existingUser, err := s.userRepo.GetByEmail(ctx, req.Email)
+    if err == nil && existingUser != nil {
+        s.logger.Info("User already exists, returning existing onboarding status",
+            zap.String("email", req.Email),
+            zap.String("userId", existingUser.ID.String()),
+            zap.String("status", string(existingUser.OnboardingStatus)))
 
-		return &entities.OnboardingStartResponse{
-			UserID:           existingUser.ID,
-			OnboardingStatus: existingUser.OnboardingStatus,
-			NextStep:         s.determineNextStep(existingUser),
-		}, nil
-	}
+        return &entities.OnboardingStartResponse{
+            UserID:           existingUser.ID,
+            OnboardingStatus: existingUser.OnboardingStatus,
+            NextStep:         s.determineNextStep(existingUser),
+        }, nil
+    }
 
 	// Create new user
 	user := &entities.UserProfile{
@@ -165,10 +165,15 @@ func (s *Service) StartOnboarding(ctx context.Context, req *entities.OnboardingS
 
 // GetOnboardingStatus returns the current onboarding status for a user
 func (s *Service) GetOnboardingStatus(ctx context.Context, userID uuid.UUID) (*entities.OnboardingStatusResponse, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user: %w", err)
-	}
+    user, err := s.userRepo.GetByID(ctx, userID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+
+    // Check if user is inactive
+    if !user.IsActive {
+        return nil, fmt.Errorf("user account is inactive")
+    }
 
 	// Get completed steps
 	completedSteps, err := s.onboardingFlowRepo.GetCompletedSteps(ctx, userID)
@@ -179,14 +184,14 @@ func (s *Service) GetOnboardingStatus(ctx context.Context, userID uuid.UUID) (*e
 
 	// Get wallet status if KYC is approved
 	var walletStatus *entities.WalletStatusSummary
-	if user.OnboardingStatus == entities.OnboardingStatusKYCApproved ||
-		user.OnboardingStatus == entities.OnboardingStatusWalletsPending ||
-		user.OnboardingStatus == entities.OnboardingStatusCompleted {
+    if user.OnboardingStatus == entities.OnboardingStatusKYCApproved ||
+        user.OnboardingStatus == entities.OnboardingStatusWalletsPending ||
+        user.OnboardingStatus == entities.OnboardingStatusCompleted {
 
-		walletStatusResp, err := s.walletService.GetWalletStatus(ctx, userID)
-		if err != nil {
-			s.logger.Warn("Failed to get wallet status", zap.Error(err), zap.String("userId", userID.String()))
-		} else {
+        walletStatusResp, err := s.walletService.GetWalletStatus(ctx, userID)
+        if err != nil {
+            s.logger.Warn("Failed to get wallet status", zap.Error(err), zap.String("userId", userID.String()))
+        } else {
 			walletStatus = &entities.WalletStatusSummary{
 				TotalWallets:    walletStatusResp.TotalWallets,
 				CreatedWallets:  walletStatusResp.ReadyWallets,
@@ -203,14 +208,14 @@ func (s *Service) GetOnboardingStatus(ctx context.Context, userID uuid.UUID) (*e
 	}
 
 	// Determine current step and required actions
-	currentStep := s.determineCurrentStep(user, completedSteps)
-	requiredActions := s.determineRequiredActions(user, completedSteps)
-	canProceed := s.canProceed(user, completedSteps)
+    currentStep := s.determineCurrentStep(user, completedSteps)
+    requiredActions := s.determineRequiredActions(user, completedSteps)
+    canProceed := s.canProceed(user, completedSteps)
 
-	return &entities.OnboardingStatusResponse{
-		UserID:           user.ID,
-		OnboardingStatus: user.OnboardingStatus,
-		KYCStatus:        user.KYCStatus,
+    return &entities.OnboardingStatusResponse{
+        UserID:           user.ID,
+        OnboardingStatus: user.OnboardingStatus,
+        KYCStatus:        user.KYCStatus,
 		CurrentStep:      currentStep,
 		CompletedSteps:   completedSteps,
 		WalletStatus:     walletStatus,
@@ -221,16 +226,16 @@ func (s *Service) GetOnboardingStatus(ctx context.Context, userID uuid.UUID) (*e
 
 // SubmitKYC handles KYC document submission
 func (s *Service) SubmitKYC(ctx context.Context, userID uuid.UUID, req *entities.KYCSubmitRequest) error {
-	s.logger.Info("Submitting KYC documents", zap.String("userId", userID.String()))
+    s.logger.Info("Submitting KYC documents", zap.String("userId", userID.String()))
 
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("failed to get user: %w", err)
-	}
+    user, err := s.userRepo.GetByID(ctx, userID)
+    if err != nil {
+        return fmt.Errorf("failed to get user: %w", err)
+    }
 
-	if !user.CanStartKYC() {
-		return fmt.Errorf("user cannot start KYC process")
-	}
+    if !user.CanStartKYC() {
+        return fmt.Errorf("user cannot start KYC process")
+    }
 
 	// Submit to KYC provider
 	providerRef, err := s.kycProvider.SubmitKYC(ctx, userID, req.Documents, req.PersonalInfo)
@@ -263,14 +268,14 @@ func (s *Service) SubmitKYC(ctx context.Context, userID uuid.UUID, req *entities
 
 	// Update user status
 	now := time.Now()
-	user.OnboardingStatus = entities.OnboardingStatusKYCPending
-	user.KYCProviderRef = &providerRef
-	user.KYCSubmittedAt = &now
-	user.UpdatedAt = now
+    user.OnboardingStatus = entities.OnboardingStatusKYCPending
+    user.KYCProviderRef = &providerRef
+    user.KYCSubmittedAt = &now
+    user.UpdatedAt = now
 
-	if err := s.userRepo.Update(ctx, user); err != nil {
-		return fmt.Errorf("failed to update user status: %w", err)
-	}
+    if err := s.userRepo.Update(ctx, user); err != nil {
+        return fmt.Errorf("failed to update user status: %w", err)
+    }
 
 	// Update onboarding flow
 	if err := s.markStepCompleted(ctx, userID, entities.StepKYCSubmission, map[string]any{

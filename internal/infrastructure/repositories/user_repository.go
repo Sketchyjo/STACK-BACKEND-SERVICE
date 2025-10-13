@@ -426,6 +426,84 @@ func (r *UserRepository) GetUserByEmailForLogin(ctx context.Context, email strin
 	return user, nil
 }
 
+// PhoneExists checks if a phone number already exists
+func (r *UserRepository) PhoneExists(ctx context.Context, phone string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM users WHERE phone = $1 AND is_active = true)`
+	
+	var exists bool
+	err := r.db.QueryRowContext(ctx, query, phone).Scan(&exists)
+	if err != nil {
+		r.logger.Error("Failed to check phone existence", zap.Error(err), zap.String("phone", phone))
+		return false, fmt.Errorf("failed to check phone existence: %w", err)
+	}
+
+	r.logger.Debug("Checked phone existence", zap.String("phone", phone), zap.Bool("exists", exists))
+	return exists, nil
+}
+
+// GetUserByPhoneForLogin retrieves a user by phone for login purposes (includes password hash)
+func (r *UserRepository) GetUserByPhoneForLogin(ctx context.Context, phone string) (*entities.User, error) {
+	query := `
+		SELECT id, email, phone, password_hash, auth_provider_id,
+		       email_verified, phone_verified, onboarding_status, kyc_status,
+		       kyc_provider_ref, kyc_submitted_at, kyc_approved_at, kyc_rejection_reason,
+		       role, is_active, last_login_at, created_at, updated_at
+		FROM users 
+		WHERE phone = $1 AND is_active = true`
+
+	user := &entities.User{}
+	var kycSubmittedAt, kycApprovedAt, lastLoginAt sql.NullTime
+	var kycRejectionReason, kycProviderRef sql.NullString
+
+	err := r.db.QueryRowContext(ctx, query, phone).Scan(
+		&user.ID,
+		&user.Email,
+		&user.Phone,
+		&user.PasswordHash,
+		&user.AuthProviderID,
+		&user.EmailVerified,
+		&user.PhoneVerified,
+		&user.OnboardingStatus,
+		&user.KYCStatus,
+		&kycProviderRef,
+		&kycSubmittedAt,
+		&kycApprovedAt,
+		&kycRejectionReason,
+		&user.Role,
+		&user.IsActive,
+		&lastLoginAt,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("user not found")
+		}
+		r.logger.Error("Failed to get user by phone for login", zap.Error(err), zap.String("phone", phone))
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// Handle nullable fields
+	if kycProviderRef.Valid {
+		user.KYCProviderRef = &kycProviderRef.String
+	}
+	if kycSubmittedAt.Valid {
+		user.KYCSubmittedAt = &kycSubmittedAt.Time
+	}
+	if kycApprovedAt.Valid {
+		user.KYCApprovedAt = &kycApprovedAt.Time
+	}
+	if kycRejectionReason.Valid {
+		user.KYCRejectionReason = &kycRejectionReason.String
+	}
+	if lastLoginAt.Valid {
+		user.LastLoginAt = &lastLoginAt.Time
+	}
+
+	return user, nil
+}
+
 // GetUserEntityByID retrieves a user as User entity by ID (excludes sensitive fields like password)
 func (r *UserRepository) GetUserEntityByID(ctx context.Context, id uuid.UUID) (*entities.User, error) {
 	query := `

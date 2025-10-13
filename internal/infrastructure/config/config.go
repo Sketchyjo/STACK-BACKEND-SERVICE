@@ -6,24 +6,27 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
 // Config holds all configuration for the application
 type Config struct {
-	Environment string           `mapstructure:"environment"`
-	LogLevel    string           `mapstructure:"log_level"`
-	Server      ServerConfig     `mapstructure:"server"`
-	Database    DatabaseConfig   `mapstructure:"database"`
-	Redis       RedisConfig      `mapstructure:"redis"`
-	JWT         JWTConfig        `mapstructure:"jwt"`
-	Blockchain  BlockchainConfig `mapstructure:"blockchain"`
-	Payment     PaymentConfig    `mapstructure:"payment"`
-	Security    SecurityConfig   `mapstructure:"security"`
-	Circle      CircleConfig     `mapstructure:"circle"`
-	KYC         KYCConfig        `mapstructure:"kyc"`
-	Email       EmailConfig      `mapstructure:"email"`
-	ZeroG       ZeroGConfig      `mapstructure:"zerog"`
+	Environment  string             `mapstructure:"environment"`
+	LogLevel     string             `mapstructure:"log_level"`
+	Server       ServerConfig       `mapstructure:"server"`
+	Database     DatabaseConfig     `mapstructure:"database"`
+	Redis        RedisConfig        `mapstructure:"redis"`
+	JWT          JWTConfig          `mapstructure:"jwt"`
+	Blockchain   BlockchainConfig   `mapstructure:"blockchain"`
+	Payment      PaymentConfig      `mapstructure:"payment"`
+	Security     SecurityConfig     `mapstructure:"security"`
+	Circle       CircleConfig       `mapstructure:"circle"`
+	KYC          KYCConfig          `mapstructure:"kyc"`
+	Email        EmailConfig        `mapstructure:"email"`
+	SMS          SMSConfig          `mapstructure:"sms"`
+	Verification VerificationConfig `mapstructure:"verification"`
+	ZeroG        ZeroGConfig        `mapstructure:"zerog"`
 }
 
 type ServerConfig struct {
@@ -141,6 +144,21 @@ type EmailConfig struct {
 	Environment string `mapstructure:"environment"` // "development", "staging", "production"
 }
 
+type SMSConfig struct {
+	Provider    string `mapstructure:"provider"` // "twilio", "mock"
+	APIKey      string `mapstructure:"api_key"`
+	APISecret   string `mapstructure:"api_secret"`
+	FromNumber  string `mapstructure:"from_number"`
+	Environment string `mapstructure:"environment"` // "development", "staging", "production"
+}
+
+type VerificationConfig struct {
+	CodeLength       int `mapstructure:"code_length"`
+	CodeTTLMinutes   int `mapstructure:"code_ttl_minutes"`
+	MaxAttempts      int `mapstructure:"max_attempts"`
+	RateLimitPerHour int `mapstructure:"rate_limit_per_hour"`
+}
+
 // ZeroGConfig contains configuration for 0G Network integration
 type ZeroGConfig struct {
 	// Storage configuration
@@ -148,30 +166,30 @@ type ZeroGConfig struct {
 	// Compute/Inference configuration
 	Compute ZeroGComputeConfig `mapstructure:"compute"`
 	// General settings
-	Timeout         int  `mapstructure:"timeout"`          // Request timeout in seconds
-	MaxRetries      int  `mapstructure:"max_retries"`      // Maximum retry attempts
-	RetryBackoffMs  int  `mapstructure:"retry_backoff_ms"` // Retry backoff in milliseconds
-	EnableMetrics   bool `mapstructure:"enable_metrics"`   // Enable observability metrics
-	EnableTracing   bool `mapstructure:"enable_tracing"`   // Enable distributed tracing
+	Timeout        int  `mapstructure:"timeout"`          // Request timeout in seconds
+	MaxRetries     int  `mapstructure:"max_retries"`      // Maximum retry attempts
+	RetryBackoffMs int  `mapstructure:"retry_backoff_ms"` // Retry backoff in milliseconds
+	EnableMetrics  bool `mapstructure:"enable_metrics"`   // Enable observability metrics
+	EnableTracing  bool `mapstructure:"enable_tracing"`   // Enable distributed tracing
 }
 
 // ZeroGStorageConfig contains 0G storage specific configuration
 type ZeroGStorageConfig struct {
-	RPCEndpoint     string `mapstructure:"rpc_endpoint"`     // 0G storage RPC endpoint
-	IndexerRPC      string `mapstructure:"indexer_rpc"`     // 0G indexer RPC endpoint
-	PrivateKey      string `mapstructure:"private_key"`     // Private key for storage operations
-	MinReplicas     int    `mapstructure:"min_replicas"`    // Minimum replication count
-	ExpectedReplicas int   `mapstructure:"expected_replicas"` // Expected replication count
-	Namespaces      ZeroGNamespaces `mapstructure:"namespaces"` // Storage namespaces
+	RPCEndpoint      string          `mapstructure:"rpc_endpoint"`      // 0G storage RPC endpoint
+	IndexerRPC       string          `mapstructure:"indexer_rpc"`       // 0G indexer RPC endpoint
+	PrivateKey       string          `mapstructure:"private_key"`       // Private key for storage operations
+	MinReplicas      int             `mapstructure:"min_replicas"`      // Minimum replication count
+	ExpectedReplicas int             `mapstructure:"expected_replicas"` // Expected replication count
+	Namespaces       ZeroGNamespaces `mapstructure:"namespaces"`        // Storage namespaces
 }
 
 // ZeroGComputeConfig contains 0G compute/inference specific configuration
 type ZeroGComputeConfig struct {
-	BrokerEndpoint string `mapstructure:"broker_endpoint"` // 0G compute broker endpoint
-	PrivateKey     string `mapstructure:"private_key"`     // Private key for compute operations
-	ProviderID     string `mapstructure:"provider_id"`     // Preferred inference provider ID
-	ModelConfig    ZeroGModelConfig `mapstructure:"model_config"` // AI model configuration
-	Funding        ZeroGFunding `mapstructure:"funding"`     // Account funding configuration
+	BrokerEndpoint string           `mapstructure:"broker_endpoint"` // 0G compute broker endpoint
+	PrivateKey     string           `mapstructure:"private_key"`     // Private key for compute operations
+	ProviderID     string           `mapstructure:"provider_id"`     // Preferred inference provider ID
+	ModelConfig    ZeroGModelConfig `mapstructure:"model_config"`    // AI model configuration
+	Funding        ZeroGFunding     `mapstructure:"funding"`         // Account funding configuration
 }
 
 // ZeroGNamespaces contains predefined storage namespaces
@@ -193,14 +211,17 @@ type ZeroGModelConfig struct {
 
 // ZeroGFunding contains account funding configuration
 type ZeroGFunding struct {
-	AutoTopup       bool    `mapstructure:"auto_topup"`       // Enable automatic balance top-up
-	MinBalance      float64 `mapstructure:"min_balance"`      // Minimum account balance threshold
-	TopupAmount     float64 `mapstructure:"topup_amount"`     // Amount to top up when threshold reached
+	AutoTopup       bool    `mapstructure:"auto_topup"`        // Enable automatic balance top-up
+	MinBalance      float64 `mapstructure:"min_balance"`       // Minimum account balance threshold
+	TopupAmount     float64 `mapstructure:"topup_amount"`      // Amount to top up when threshold reached
 	MaxAccountLimit float64 `mapstructure:"max_account_limit"` // Maximum account balance limit
 }
 
 // Load loads configuration from environment variables and config files
 func Load() (*Config, error) {
+	// Load .env file if it exists (ignore errors if file doesn't exist)
+	godotenv.Load()
+
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("./configs")
@@ -301,15 +322,26 @@ func setDefaults() {
 	viper.SetDefault("email.from_name", "Stack Service")
 	viper.SetDefault("email.environment", "development")
 	viper.SetDefault("email.base_url", "http://localhost:3000")
+
+	// SMS defaults
+	viper.SetDefault("sms.provider", "mock")
+	viper.SetDefault("sms.environment", "development")
+
+	// Verification defaults
+	viper.SetDefault("verification.code_length", 6)
+	viper.SetDefault("verification.code_ttl_minutes", 10)
+	viper.SetDefault("verification.max_attempts", 3)
+	viper.SetDefault("verification.rate_limit_per_hour", 3)
+
 	viper.SetDefault("security.session_timeout", 3600) // 1 hour
 
 	// 0G Network defaults
 	// General 0G settings
-	viper.SetDefault("zerog.timeout", 30)                // 30 seconds
-	viper.SetDefault("zerog.max_retries", 3)             // 3 retry attempts
-	viper.SetDefault("zerog.retry_backoff_ms", 1000)     // 1 second
-	viper.SetDefault("zerog.enable_metrics", true)       // Enable metrics
-	viper.SetDefault("zerog.enable_tracing", true)       // Enable tracing
+	viper.SetDefault("zerog.timeout", 30)            // 30 seconds
+	viper.SetDefault("zerog.max_retries", 3)         // 3 retry attempts
+	viper.SetDefault("zerog.retry_backoff_ms", 1000) // 1 second
+	viper.SetDefault("zerog.enable_metrics", true)   // Enable metrics
+	viper.SetDefault("zerog.enable_tracing", true)   // Enable tracing
 
 	// Storage defaults - 0G Testnet endpoints
 	viper.SetDefault("zerog.storage.rpc_endpoint", "https://evmrpc-testnet.0g.ai/")
