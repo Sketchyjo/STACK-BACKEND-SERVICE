@@ -262,6 +262,8 @@ func (r *FundingEventJobRepository) GetDLQJobs(ctx context.Context, limit int, o
 
 // GetPendingDepositsForReconciliation retrieves deposits stuck in pending state
 func (r *FundingEventJobRepository) GetPendingDepositsForReconciliation(ctx context.Context, threshold time.Duration, limit int) ([]*entities.ReconciliationCandidate, error) {
+	thresholdTime := time.Now().Add(-threshold)
+
 	query := `
 		SELECT 
 			d.id as deposit_id,
@@ -273,15 +275,15 @@ func (r *FundingEventJobRepository) GetPendingDepositsForReconciliation(ctx cont
 			w.address as to_address,
 			d.status,
 			d.created_at,
-			EXTRACT(EPOCH FROM (NOW() - d.created_at)) * INTERVAL '1 second' as pending_duration
+			EXTRACT(EPOCH FROM (NOW() - d.created_at))::BIGINT as pending_duration_seconds
 		FROM deposits d
 		LEFT JOIN wallets w ON d.user_id = w.user_id AND d.chain = w.chain
 		WHERE d.status = 'pending'
-		  AND d.created_at < NOW() - $1::interval
+		  AND d.created_at < $1
 		ORDER BY d.created_at ASC
 		LIMIT $2`
 
-	rows, err := r.db.QueryContext(ctx, query, threshold, limit)
+	rows, err := r.db.QueryContext(ctx, query, thresholdTime, limit)
 	if err != nil {
 		r.logger.Error("Failed to get reconciliation candidates", "error", err)
 		return nil, fmt.Errorf("failed to get reconciliation candidates: %w", err)

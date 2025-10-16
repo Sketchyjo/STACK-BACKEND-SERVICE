@@ -24,7 +24,7 @@ type AuditLog struct {
 	ErrorMessage *string                `db:"error_message"`
 	IPAddress    *string                `db:"ip_address"`
 	UserAgent    *string                `db:"user_agent"`
-	CreatedAt    time.Time              `db:"created_at"`
+	CreatedAt    time.Time              `db:"at"`
 }
 
 // AuditService implements the audit service interface with database persistence
@@ -115,26 +115,72 @@ func (a *AuditService) logEvent(
 	// Insert audit log
 	query := `
 		INSERT INTO audit_logs (
-			id, user_id, action, resource_type, resource_id,
-			changes, status, error_message, ip_address, user_agent,
-			created_at
+			id,
+			user_id,
+			action,
+			resource_type,
+			resource_id,
+			entity,
+			before,
+			after,
+			changes,
+			status,
+			error_message,
+			ip_address,
+			user_agent,
+			at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			$1, $2, $3, $4, $5,
+			$6, $7, $8, $9, $10,
+			$11, $12, $13, $14
 		)`
 
 	auditID := uuid.New()
+	var beforeJSON []byte
+	if before != nil {
+		if data, marshalErr := json.Marshal(before); marshalErr != nil {
+			a.logger.Warn("Failed to marshal audit before state", zap.Error(marshalErr))
+			beforeJSON = []byte("{}")
+		} else {
+			beforeJSON = data
+		}
+	}
+
+	var afterJSON []byte
+	if after != nil {
+		if data, marshalErr := json.Marshal(after); marshalErr != nil {
+			a.logger.Warn("Failed to marshal audit after state", zap.Error(marshalErr))
+			afterJSON = []byte("{}")
+		} else {
+			afterJSON = data
+		}
+	}
+
+	var beforeParam interface{}
+	if beforeJSON != nil {
+		beforeParam = beforeJSON
+	}
+
+	var afterParam interface{}
+	if afterJSON != nil {
+		afterParam = afterJSON
+	}
+
 	_, err = a.db.ExecContext(ctx, query,
 		auditID,
 		&userID,
 		fmt.Sprintf("%s:%s", actor, action), // Combine actor and action
 		entity,
 		resourceID,
+		entity,
+		beforeParam,
+		afterParam,
 		changesJSON,
 		status,
 		errorMsg,
 		ipAddress,
 		userAgent,
-		time.Now(),
+		time.Now().UTC(),
 	)
 
 	if err != nil {
@@ -164,7 +210,7 @@ func (a *AuditService) GetAuditLogs(ctx context.Context, userID uuid.UUID, actio
 	query := `
 		SELECT id, user_id, action, resource_type, resource_id,
 		       changes, status, error_message, ip_address, user_agent,
-		       created_at
+		       at AS created_at
 		FROM audit_logs
 		WHERE user_id = $1`
 
@@ -177,7 +223,7 @@ func (a *AuditService) GetAuditLogs(ctx context.Context, userID uuid.UUID, actio
 		args = append(args, "%"+*action+"%")
 	}
 
-	query += " ORDER BY created_at DESC"
+	query += " ORDER BY at DESC"
 
 	if limit > 0 {
 		paramCount++
