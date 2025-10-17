@@ -65,7 +65,7 @@ func (s *OnboardingJobService) CreateOnboardingJob(ctx context.Context, userID u
 		ID:           uuid.New(),
 		UserID:       userID,
 		Status:       entities.OnboardingJobStatusQueued,
-		JobType:      entities.OnboardingJobTypeFullOnboarding,
+		JobType:      entities.OnboardingJobTypeWalletOnly,
 		AttemptCount: 0,
 		MaxAttempts:  5,
 		CreatedAt:    time.Now(),

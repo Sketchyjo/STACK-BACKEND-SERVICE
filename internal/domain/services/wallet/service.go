@@ -3,6 +3,7 @@ package wallet
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,17 @@ type Service struct {
 	circleClient        CircleClient
 	auditService        AuditService
 	logger              *zap.Logger
+	config              Config
+}
+
+const defaultWalletSetNamePrefix = "STACK-WalletSet"
+
+// Config captures runtime configuration for the wallet service
+type Config struct {
+	EntitySecretCiphertext string
+	WalletSetNamePrefix    string
+	SupportedChains        []entities.WalletChain
+	DefaultWalletSetID     string
 }
 
 // Repository interfaces
@@ -49,7 +61,7 @@ type WalletProvisioningJobRepository interface {
 
 // External service interfaces
 type CircleClient interface {
-	CreateWalletSet(ctx context.Context, name string) (*entities.CircleWalletSetResponse, error)
+	CreateWalletSet(ctx context.Context, name string, entitySecretCiphertext string) (*entities.CircleWalletSetResponse, error)
 	GetWalletSet(ctx context.Context, walletSetID string) (*entities.CircleWalletSetResponse, error)
 	CreateWallet(ctx context.Context, req entities.CircleWalletCreateRequest) (*entities.CircleWalletCreateResponse, error)
 	GetWallet(ctx context.Context, walletID string) (*entities.CircleWalletCreateResponse, error)
@@ -69,7 +81,20 @@ func NewService(
 	circleClient CircleClient,
 	auditService AuditService,
 	logger *zap.Logger,
+	cfg Config,
 ) *Service {
+	cfg.EntitySecretCiphertext = strings.TrimSpace(cfg.EntitySecretCiphertext)
+	cfg.DefaultWalletSetID = strings.TrimSpace(cfg.DefaultWalletSetID)
+	if cfg.WalletSetNamePrefix == "" {
+		cfg.WalletSetNamePrefix = defaultWalletSetNamePrefix
+	}
+
+	cfg.SupportedChains = normalizeSupportedChains(cfg.SupportedChains, logger)
+
+	if cfg.EntitySecretCiphertext == "" {
+		logger.Warn("Circle entity secret ciphertext is not configured; wallet provisioning will fail until it is set")
+	}
+
 	return &Service{
 		walletRepo:          walletRepo,
 		walletSetRepo:       walletSetRepo,
@@ -77,7 +102,45 @@ func NewService(
 		circleClient:        circleClient,
 		auditService:        auditService,
 		logger:              logger,
+		config:              cfg,
 	}
+}
+
+func normalizeSupportedChains(chains []entities.WalletChain, logger *zap.Logger) []entities.WalletChain {
+	if len(chains) == 0 {
+		return []entities.WalletChain{
+			entities.ChainETH,
+			entities.ChainMATIC,
+			entities.ChainSOL,
+			entities.ChainBASE,
+		}
+	}
+
+	normalized := make([]entities.WalletChain, 0, len(chains))
+	seen := make(map[entities.WalletChain]struct{})
+
+	for _, chain := range chains {
+		if !chain.IsValid() {
+			logger.Warn("Ignoring unsupported wallet chain in configuration", zap.String("chain", string(chain)))
+			continue
+		}
+		if _, ok := seen[chain]; ok {
+			continue
+		}
+		seen[chain] = struct{}{}
+		normalized = append(normalized, chain)
+	}
+
+	if len(normalized) == 0 {
+		return []entities.WalletChain{
+			entities.ChainETH,
+			entities.ChainMATIC,
+			entities.ChainSOL,
+			entities.ChainBASE,
+		}
+	}
+
+	return normalized
 }
 
 // CreateWalletsForUser creates wallets for a user across specified chains
@@ -85,6 +148,10 @@ func (s *Service) CreateWalletsForUser(ctx context.Context, userID uuid.UUID, ch
 	s.logger.Info("Creating wallets for user",
 		zap.String("userID", userID.String()),
 		zap.Any("chains", chains))
+
+	if len(chains) == 0 {
+		chains = s.config.SupportedChains
+	}
 
 	// Check if user already has a provisioning job
 	existingJob, err := s.provisioningJobRepo.GetByUserID(ctx, userID)
@@ -378,9 +445,72 @@ func (s *Service) RetryFailedWalletProvisioning(ctx context.Context, limit int) 
 // Helper methods
 
 func (s *Service) ensureWalletSet(ctx context.Context) (*entities.WalletSet, error) {
+	if s.config.EntitySecretCiphertext == "" {
+		return nil, fmt.Errorf("circle entity secret ciphertext is not configured")
+	}
+
+	if s.config.DefaultWalletSetID != "" {
+		if walletSet, err := s.walletSetRepo.GetByCircleWalletSetID(ctx, s.config.DefaultWalletSetID); err == nil && walletSet != nil {
+			if walletSet.EntitySecretCiphertext == "" {
+				walletSet.EntitySecretCiphertext = s.config.EntitySecretCiphertext
+				if updateErr := s.walletSetRepo.Update(ctx, walletSet); updateErr != nil {
+					s.logger.Warn("Failed to update wallet set entity secret",
+						zap.Error(updateErr),
+						zap.String("walletSetID", walletSet.ID.String()))
+				}
+			}
+			return walletSet, nil
+		}
+
+		s.logger.Info("Configured Circle wallet set not found locally, attempting to hydrate",
+			zap.String("circleWalletSetID", s.config.DefaultWalletSetID))
+
+		circleSet, err := s.circleClient.GetWalletSet(ctx, s.config.DefaultWalletSetID)
+		if err == nil && circleSet != nil {
+			walletSet := &entities.WalletSet{
+				ID:                     uuid.New(),
+				Name:                   circleSet.WalletSet.Name,
+				CircleWalletSetID:      circleSet.WalletSet.ID,
+				EntitySecretCiphertext: s.config.EntitySecretCiphertext,
+				Status:                 entities.WalletSetStatusActive,
+				CreatedAt:              time.Now(),
+				UpdatedAt:              time.Now(),
+			}
+
+			if createErr := s.walletSetRepo.Create(ctx, walletSet); createErr != nil {
+				s.logger.Warn("Failed to persist hydrated wallet set, attempting to reuse existing record",
+					zap.Error(createErr),
+					zap.String("circleWalletSetID", walletSet.CircleWalletSetID))
+
+				existing, fetchErr := s.walletSetRepo.GetByCircleWalletSetID(ctx, walletSet.CircleWalletSetID)
+				if fetchErr == nil && existing != nil {
+					return existing, nil
+				}
+
+				return nil, fmt.Errorf("failed to persist configured wallet set: %w", createErr)
+			}
+
+			return walletSet, nil
+		}
+
+		if err != nil {
+			s.logger.Warn("Failed to load configured Circle wallet set from API",
+				zap.String("circleWalletSetID", s.config.DefaultWalletSetID),
+				zap.Error(err))
+		}
+	}
+
 	// Try to get existing active wallet set
 	walletSet, err := s.walletSetRepo.GetActive(ctx)
 	if err == nil && walletSet != nil {
+		if walletSet.EntitySecretCiphertext == "" {
+			walletSet.EntitySecretCiphertext = s.config.EntitySecretCiphertext
+			if updateErr := s.walletSetRepo.Update(ctx, walletSet); updateErr != nil {
+				s.logger.Warn("Failed to backfill entity secret on wallet set",
+					zap.Error(updateErr),
+					zap.String("walletSetID", walletSet.ID.String()))
+			}
+		}
 		s.logger.Debug("Using existing wallet set",
 			zap.String("walletSetID", walletSet.ID.String()),
 			zap.String("circleWalletSetID", walletSet.CircleWalletSetID))
@@ -390,7 +520,8 @@ func (s *Service) ensureWalletSet(ctx context.Context) (*entities.WalletSet, err
 	s.logger.Info("Creating new wallet set")
 
 	// Create new wallet set in Circle
-	circleResp, err := s.circleClient.CreateWalletSet(ctx, "STACK-WalletSet-"+time.Now().Format("20060102"))
+	setName := fmt.Sprintf("%s-%s", s.config.WalletSetNamePrefix, time.Now().Format("20060102"))
+	circleResp, err := s.circleClient.CreateWalletSet(ctx, setName, s.config.EntitySecretCiphertext)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Circle wallet set: %w", err)
 	}
@@ -398,8 +529,9 @@ func (s *Service) ensureWalletSet(ctx context.Context) (*entities.WalletSet, err
 	// Create wallet set record
 	walletSet = &entities.WalletSet{
 		ID:                     uuid.New(),
+		Name:                   setName,
 		CircleWalletSetID:      circleResp.WalletSet.ID,
-		EntitySecretCiphertext: "placeholder-entity-secret", // TODO: Get from secrets manager
+		EntitySecretCiphertext: s.config.EntitySecretCiphertext,
 		Status:                 entities.WalletSetStatusActive,
 		CreatedAt:              time.Now(),
 		UpdatedAt:              time.Now(),
@@ -541,4 +673,9 @@ func (s *Service) GetMetrics() map[string]interface{} {
 	metrics["timestamp"] = time.Now()
 
 	return metrics
+}
+
+// SupportedChains returns the configured wallet chains
+func (s *Service) SupportedChains() []entities.WalletChain {
+	return append([]entities.WalletChain(nil), s.config.SupportedChains...)
 }

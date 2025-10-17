@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -156,6 +157,7 @@ func NewClient(config Config, logger *zap.Logger) *Client {
 			config.BaseURL = SandboxBaseURL
 		}
 	}
+	config.BaseURL = strings.TrimRight(config.BaseURL, "/")
 
 	httpClient := &http.Client{
 		Timeout: config.Timeout,
@@ -180,9 +182,14 @@ func NewClient(config Config, logger *zap.Logger) *Client {
 }
 
 // CreateWalletSet creates a new wallet set
-func (c *Client) CreateWalletSet(ctx context.Context, name string) (*entities.CircleWalletSetResponse, error) {
+func (c *Client) CreateWalletSet(ctx context.Context, name string, entitySecretCiphertext string) (*entities.CircleWalletSetResponse, error) {
 	request := entities.CircleWalletSetRequest{
-		Name: name,
+		Name:                   name,
+		EntitySecretCiphertext: entitySecretCiphertext,
+	}
+
+	if strings.TrimSpace(request.EntitySecretCiphertext) == "" {
+		return nil, fmt.Errorf("entity secret ciphertext is required to create a wallet set")
 	}
 
 	var response entities.CircleWalletSetResponse

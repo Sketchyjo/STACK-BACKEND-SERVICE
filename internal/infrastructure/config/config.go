@@ -121,8 +121,13 @@ type SecurityConfig struct {
 }
 
 type CircleConfig struct {
-	APIKey      string `mapstructure:"api_key"`
-	Environment string `mapstructure:"environment"` // sandbox or production
+	APIKey                 string   `mapstructure:"api_key"`
+	Environment            string   `mapstructure:"environment"` // sandbox or production
+	BaseURL                string   `mapstructure:"base_url"`
+	EntitySecretCiphertext string   `mapstructure:"entity_secret_ciphertext"`
+	DefaultWalletSetID     string   `mapstructure:"default_wallet_set_id"`
+	DefaultWalletSetName   string   `mapstructure:"default_wallet_set_name"`
+	SupportedChains        []string `mapstructure:"supported_chains"`
 }
 
 type KYCConfig struct {
@@ -311,6 +316,11 @@ func setDefaults() {
 	// Circle defaults
 	viper.SetDefault("circle.environment", "sandbox")
 	viper.SetDefault("circle.api_key", "")
+	viper.SetDefault("circle.base_url", "")
+	viper.SetDefault("circle.entity_secret_ciphertext", "")
+	viper.SetDefault("circle.default_wallet_set_id", "")
+	viper.SetDefault("circle.default_wallet_set_name", "STACK-WalletSet")
+	viper.SetDefault("circle.supported_chains", []string{"ETH", "MATIC", "SOL", "BASE"})
 
 	// KYC defaults
 	viper.SetDefault("kyc.provider", "")
@@ -397,6 +407,31 @@ func overrideFromEnv() {
 	// Circle API
 	if circleKey := os.Getenv("CIRCLE_API_KEY"); circleKey != "" {
 		viper.Set("circle.api_key", circleKey)
+	}
+	if circleBaseURL := os.Getenv("CIRCLE_BASE_URL"); circleBaseURL != "" {
+		viper.Set("circle.base_url", circleBaseURL)
+	}
+	if circleEntitySecret := os.Getenv("CIRCLE_ENTITY_SECRET_CIPHERTEXT"); circleEntitySecret != "" {
+		viper.Set("circle.entity_secret_ciphertext", circleEntitySecret)
+	}
+	if circleWalletSetID := os.Getenv("CIRCLE_DEFAULT_WALLET_SET_ID"); circleWalletSetID != "" {
+		viper.Set("circle.default_wallet_set_id", circleWalletSetID)
+	}
+	if circleWalletSetName := os.Getenv("CIRCLE_DEFAULT_WALLET_SET_NAME"); circleWalletSetName != "" {
+		viper.Set("circle.default_wallet_set_name", circleWalletSetName)
+	}
+	if supportedChains := os.Getenv("CIRCLE_SUPPORTED_CHAINS"); supportedChains != "" {
+		parts := strings.Split(supportedChains, ",")
+		var chains []string
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				chains = append(chains, strings.ToUpper(trimmed))
+			}
+		}
+		if len(chains) > 0 {
+			viper.Set("circle.supported_chains", chains)
+		}
 	}
 	if circleEnv := os.Getenv("CIRCLE_ENVIRONMENT"); circleEnv != "" {
 		viper.Set("circle.environment", circleEnv)
@@ -503,6 +538,14 @@ func validate(config *Config) error {
 
 	if config.Database.URL == "" && (config.Database.Host == "" || config.Database.Name == "") {
 		return fmt.Errorf("database configuration is incomplete")
+	}
+
+	if strings.TrimSpace(config.Circle.EntitySecretCiphertext) == "" {
+		return fmt.Errorf("circle entity secret ciphertext is required")
+	}
+
+	if len(config.Circle.SupportedChains) == 0 {
+		return fmt.Errorf("circle supported chains configuration is required")
 	}
 
 	return nil

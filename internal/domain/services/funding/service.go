@@ -3,6 +3,7 @@ package funding
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -165,7 +166,11 @@ func (s *Service) ProcessChainDeposit(ctx context.Context, webhook *entities.Cha
 	s.logger.Info("Processing chain deposit", "chain", webhook.Chain, "tx_hash", webhook.TxHash, "amount", webhook.Amount)
 
 	// Validate the deposit with Circle
-	amount, _ := decimal.NewFromString(webhook.Amount)
+	amountFloat, err := strconv.ParseFloat(webhook.Amount, 64)
+	if err != nil {
+		return fmt.Errorf("invalid deposit amount %q: %w", webhook.Amount, err)
+	}
+	amount := decimal.NewFromFloat(amountFloat)
 	isValid, err := s.circleAPI.ValidateDeposit(ctx, webhook.TxHash, amount)
 	if err != nil {
 		return fmt.Errorf("failed to validate deposit: %w", err)

@@ -175,6 +175,47 @@ func (h *OnboardingHandlers) GetOnboardingStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// GetKYCStatus handles GET /kyc/status
+// @Summary Get KYC status
+// @Description Returns the user's current KYC verification status and guidance
+// @Tags onboarding
+// @Produce json
+// @Success 200 {object} entities.KYCStatusResponse
+// @Failure 400 {object} entities.ErrorResponse
+// @Failure 401 {object} entities.ErrorResponse
+// @Failure 500 {object} entities.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/kyc/status [get]
+func (h *OnboardingHandlers) GetKYCStatus(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	userID, err := h.getUserID(c)
+	if err != nil {
+		h.logger.Warn("Invalid or missing user ID for KYC status", zap.Error(err))
+		c.JSON(http.StatusBadRequest, entities.ErrorResponse{
+			Code:    "INVALID_USER_ID",
+			Message: "Invalid or missing user ID",
+			Details: map[string]interface{}{"error": err.Error()},
+		})
+		return
+	}
+
+	status, err := h.onboardingService.GetKYCStatus(ctx, userID)
+	if err != nil {
+		h.logger.Error("Failed to get KYC status",
+			zap.Error(err),
+			zap.String("user_id", userID.String()))
+
+		c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+			Code:    "KYC_STATUS_ERROR",
+			Message: "Failed to retrieve KYC status",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
+}
+
 // SubmitKYC handles POST /onboarding/kyc/submit
 // @Summary Submit KYC documents
 // @Description Submits KYC documents for verification
@@ -257,10 +298,14 @@ func (h *OnboardingHandlers) SubmitKYC(c *gin.Context) {
 		zap.String("user_id", userID.String()))
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"message":    "KYC documents submitted successfully",
-		"status":     "processing",
-		"user_id":    userID.String(),
-		"next_steps": []string{"Wait for KYC review", "Check onboarding status for updates"},
+		"message": "KYC documents submitted successfully",
+		"status":  "processing",
+		"user_id": userID.String(),
+		"next_steps": []string{
+			"Wait for KYC review",
+			"You can continue using core features while verification completes",
+			"KYC unlocks virtual accounts, cards, and fiat withdrawals",
+		},
 	})
 }
 

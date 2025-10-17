@@ -13,6 +13,7 @@ import (
 
 	"github.com/stack-service/stack_service/internal/domain/entities"
 	"github.com/stack-service/stack_service/internal/domain/services"
+	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
 	"github.com/stack-service/stack_service/internal/infrastructure/adapters"
 	"github.com/stack-service/stack_service/internal/infrastructure/config"
 	"github.com/stack-service/stack_service/internal/infrastructure/repositories"
@@ -31,6 +32,7 @@ type AuthSignupHandlers struct {
 	userRepo             repositories.UserRepository
 	verificationService  services.VerificationService
 	onboardingJobService services.OnboardingJobService
+	onboardingService    *onboarding.Service
 	emailService         *adapters.EmailService
 	kycProvider          *adapters.KYCProvider
 }
@@ -43,6 +45,7 @@ func NewAuthSignupHandlers(
 	userRepo repositories.UserRepository,
 	verificationService services.VerificationService,
 	onboardingJobService services.OnboardingJobService,
+	onboardingService *onboarding.Service,
 	emailService *adapters.EmailService,
 	kycProvider *adapters.KYCProvider,
 ) *AuthSignupHandlers {
@@ -53,6 +56,7 @@ func NewAuthSignupHandlers(
 		userRepo:             userRepo,
 		verificationService:  verificationService,
 		onboardingJobService: onboardingJobService,
+		onboardingService:    onboardingService,
 		emailService:         emailService,
 		kycProvider:          kycProvider,
 	}
@@ -372,7 +376,7 @@ func (h *AuthSignupHandlers) VerifyCode(c *gin.Context) {
 	} else {
 		userProfile.PhoneVerified = true
 	}
-	userProfile.OnboardingStatus = entities.OnboardingStatusKYCPending
+	userProfile.OnboardingStatus = entities.OnboardingStatusWalletsPending
 	if err := h.userRepo.Update(ctx, userProfile); err != nil {
 		h.logger.Error("Failed to update user verification status", zap.Error(err), zap.String("user_id", userProfile.ID.String()))
 		c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
@@ -380,6 +384,14 @@ func (h *AuthSignupHandlers) VerifyCode(c *gin.Context) {
 			Message: "Failed to update user verification status",
 		})
 		return
+	}
+
+	if err := h.onboardingService.CompleteEmailVerification(ctx, userProfile.ID); err != nil {
+		h.logger.Warn("Failed to advance onboarding after email verification",
+			zap.Error(err),
+			zap.String("user_id", userProfile.ID.String()))
+	} else {
+		userProfile.OnboardingStatus = entities.OnboardingStatusWalletsPending
 	}
 
 	// Trigger async onboarding jobs (KYC, Wallet, Welcome Email)

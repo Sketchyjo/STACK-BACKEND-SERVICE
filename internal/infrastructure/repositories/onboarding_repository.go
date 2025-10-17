@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	// "github.com/lib/pq"
+	"github.com/lib/pq"
 	"go.uber.org/zap"
 
 	"github.com/stack-service/stack_service/internal/domain/entities"
@@ -32,7 +32,7 @@ func NewOnboardingFlowRepository(db *sql.DB, logger *zap.Logger) *OnboardingFlow
 func (r *OnboardingFlowRepository) Create(ctx context.Context, flow *entities.OnboardingFlow) error {
 	query := `
 		INSERT INTO onboarding_flows (
-			id, user_id, step_type, status, metadata, error_message,
+			id, user_id, step, status, data, error_message,
 			started_at, completed_at, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
@@ -63,7 +63,7 @@ func (r *OnboardingFlowRepository) Create(ctx context.Context, flow *entities.On
 // GetByUserID retrieves all onboarding flows for a user
 func (r *OnboardingFlowRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]*entities.OnboardingFlow, error) {
 	query := `
-		SELECT id, user_id, step_type, status, metadata, error_message,
+		SELECT id, user_id, step, status, data, error_message,
 		       started_at, completed_at, created_at, updated_at
 		FROM onboarding_flows 
 		WHERE user_id = $1
@@ -114,10 +114,10 @@ func (r *OnboardingFlowRepository) GetByUserID(ctx context.Context, userID uuid.
 // GetByUserAndStep retrieves an onboarding flow by user ID and step type
 func (r *OnboardingFlowRepository) GetByUserAndStep(ctx context.Context, userID uuid.UUID, step entities.OnboardingStepType) (*entities.OnboardingFlow, error) {
 	query := `
-		SELECT id, user_id, step_type, status, metadata, error_message,
+		SELECT id, user_id, step, status, data, error_message,
 		       started_at, completed_at, created_at, updated_at
 		FROM onboarding_flows 
-		WHERE user_id = $1 AND step_type = $2
+		WHERE user_id = $1 AND step = $2
 		ORDER BY created_at DESC
 		LIMIT 1`
 
@@ -160,7 +160,7 @@ func (r *OnboardingFlowRepository) GetByUserAndStep(ctx context.Context, userID 
 func (r *OnboardingFlowRepository) Update(ctx context.Context, flow *entities.OnboardingFlow) error {
 	query := `
 		UPDATE onboarding_flows SET 
-			status = $2, metadata = $3, error_message = $4, 
+			status = $2, data = $3, error_message = $4, 
 			started_at = $5, completed_at = $6, updated_at = $7
 		WHERE id = $1`
 
@@ -186,10 +186,10 @@ func (r *OnboardingFlowRepository) Update(ctx context.Context, flow *entities.On
 // GetCompletedSteps returns the list of completed onboarding steps for a user
 func (r *OnboardingFlowRepository) GetCompletedSteps(ctx context.Context, userID uuid.UUID) ([]entities.OnboardingStepType, error) {
 	query := `
-		SELECT DISTINCT step_type
+		SELECT DISTINCT step
 		FROM onboarding_flows 
 		WHERE user_id = $1 AND status = $2
-		ORDER BY step_type`
+		ORDER BY step`
 
 	rows, err := r.db.QueryContext(ctx, query, userID, string(entities.StepStatusCompleted))
 	if err != nil {
@@ -198,7 +198,7 @@ func (r *OnboardingFlowRepository) GetCompletedSteps(ctx context.Context, userID
 	}
 	defer rows.Close()
 
-	var steps []entities.OnboardingStepType
+	steps := make([]entities.OnboardingStepType, 0)
 	for rows.Next() {
 		var stepType entities.OnboardingStepType
 		if err := rows.Scan(&stepType); err != nil {
@@ -446,7 +446,10 @@ func NewWalletProvisioningJobRepository(db *sql.DB, logger *zap.Logger) *WalletP
 
 // Create creates a new wallet provisioning job
 func (r *WalletProvisioningJobRepository) Create(ctx context.Context, job *entities.WalletProvisioningJob) error {
-	chainsJSON, _ := stringSliceToJSON(job.Chains)
+	chainsArray := pq.StringArray(job.Chains)
+	if chainsArray == nil {
+		chainsArray = pq.StringArray{}
+	}
 
 	query := `
 		INSERT INTO wallet_provisioning_jobs (
@@ -459,7 +462,7 @@ func (r *WalletProvisioningJobRepository) Create(ctx context.Context, job *entit
 	_, err := r.db.ExecContext(ctx, query,
 		job.ID,
 		job.UserID,
-		chainsJSON,
+		chainsArray,
 		string(job.Status),
 		job.AttemptCount,
 		job.MaxAttempts,
@@ -487,13 +490,13 @@ func (r *WalletProvisioningJobRepository) GetByID(ctx context.Context, id uuid.U
 		WHERE id = $1`
 
 	job := &entities.WalletProvisioningJob{}
-	var chainsJSON string
+	var chains pq.StringArray
 	var nextRetryAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&job.ID,
 		&job.UserID,
-		&chainsJSON,
+		&chains,
 		&job.Status,
 		&job.AttemptCount,
 		&job.MaxAttempts,
@@ -511,7 +514,7 @@ func (r *WalletProvisioningJobRepository) GetByID(ctx context.Context, id uuid.U
 		return nil, fmt.Errorf("failed to get wallet provisioning job: %w", err)
 	}
 
-	job.Chains, _ = jsonToStringSlice(chainsJSON)
+	job.Chains = append([]string(nil), chains...)
 
 	if nextRetryAt.Valid {
 		job.NextRetryAt = &nextRetryAt.Time
@@ -531,13 +534,13 @@ func (r *WalletProvisioningJobRepository) GetByUserID(ctx context.Context, userI
 		LIMIT 1`
 
 	job := &entities.WalletProvisioningJob{}
-	var chainsJSON string
+	var chains pq.StringArray
 	var nextRetryAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, query, userID).Scan(
 		&job.ID,
 		&job.UserID,
-		&chainsJSON,
+		&chains,
 		&job.Status,
 		&job.AttemptCount,
 		&job.MaxAttempts,
@@ -555,7 +558,7 @@ func (r *WalletProvisioningJobRepository) GetByUserID(ctx context.Context, userI
 		return nil, fmt.Errorf("failed to get wallet provisioning job: %w", err)
 	}
 
-	job.Chains, _ = jsonToStringSlice(chainsJSON)
+	job.Chains = append([]string(nil), chains...)
 
 	if nextRetryAt.Valid {
 		job.NextRetryAt = &nextRetryAt.Time
@@ -570,13 +573,16 @@ func (r *WalletProvisioningJobRepository) GetRetryableJobs(ctx context.Context, 
 		SELECT id, user_id, chains, status, attempt_count, max_attempts,
 		       error_message, next_retry_at, created_at, updated_at
 		FROM wallet_provisioning_jobs 
-		WHERE status = $1 
+		WHERE status IN ($1, $2)
 		   AND attempt_count < max_attempts 
 		   AND (next_retry_at IS NULL OR next_retry_at <= NOW())
 		ORDER BY created_at ASC
-		LIMIT $2`
+		LIMIT $3`
 
-	rows, err := r.db.QueryContext(ctx, query, string(entities.ProvisioningStatusFailed), limit)
+	rows, err := r.db.QueryContext(ctx, query,
+		string(entities.ProvisioningStatusFailed),
+		string(entities.ProvisioningStatusRetry),
+		limit)
 	if err != nil {
 		r.logger.Error("Failed to get retryable jobs", zap.Error(err))
 		return nil, fmt.Errorf("failed to get retryable jobs: %w", err)
@@ -586,13 +592,13 @@ func (r *WalletProvisioningJobRepository) GetRetryableJobs(ctx context.Context, 
 	var jobs []*entities.WalletProvisioningJob
 	for rows.Next() {
 		job := &entities.WalletProvisioningJob{}
-		var chainsJSON string
+		var chains pq.StringArray
 		var nextRetryAt sql.NullTime
 
 		err := rows.Scan(
 			&job.ID,
 			&job.UserID,
-			&chainsJSON,
+			&chains,
 			&job.Status,
 			&job.AttemptCount,
 			&job.MaxAttempts,
@@ -606,7 +612,7 @@ func (r *WalletProvisioningJobRepository) GetRetryableJobs(ctx context.Context, 
 			return nil, fmt.Errorf("failed to scan wallet provisioning job: %w", err)
 		}
 
-		job.Chains, _ = jsonToStringSlice(chainsJSON)
+		job.Chains = append([]string(nil), chains...)
 
 		if nextRetryAt.Valid {
 			job.NextRetryAt = &nextRetryAt.Time
@@ -620,7 +626,10 @@ func (r *WalletProvisioningJobRepository) GetRetryableJobs(ctx context.Context, 
 
 // Update updates a wallet provisioning job
 func (r *WalletProvisioningJobRepository) Update(ctx context.Context, job *entities.WalletProvisioningJob) error {
-	chainsJSON, _ := stringSliceToJSON(job.Chains)
+	chainsArray := pq.StringArray(job.Chains)
+	if chainsArray == nil {
+		chainsArray = pq.StringArray{}
+	}
 
 	query := `
 		UPDATE wallet_provisioning_jobs SET 
@@ -630,7 +639,7 @@ func (r *WalletProvisioningJobRepository) Update(ctx context.Context, job *entit
 
 	_, err := r.db.ExecContext(ctx, query,
 		job.ID,
-		chainsJSON,
+		chainsArray,
 		string(job.Status),
 		job.AttemptCount,
 		job.MaxAttempts,

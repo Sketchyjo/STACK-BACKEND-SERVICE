@@ -13,10 +13,13 @@ type WalletChain string
 
 const (
 	// EVM chains
-	ChainETH        WalletChain = "ETH"
-	ChainETHSepolia WalletChain = "ETH-SEPOLIA"
-	ChainMATIC      WalletChain = "MATIC"
-	ChainAVAX       WalletChain = "AVAX"
+	ChainETH         WalletChain = "ETH"
+	ChainETHSepolia  WalletChain = "ETH-SEPOLIA"
+	ChainMATIC       WalletChain = "MATIC"
+	ChainMATICAmoy   WalletChain = "MATIC-AMOY"
+	ChainAVAX        WalletChain = "AVAX"
+	ChainBASE        WalletChain = "BASE"
+	ChainBASESepolia WalletChain = "BASE-SEPOLIA"
 
 	// Solana
 	ChainSOL       WalletChain = "SOL"
@@ -29,12 +32,12 @@ const (
 
 // GetMainnetChains returns production chains
 func GetMainnetChains() []WalletChain {
-	return []WalletChain{ChainETH, ChainMATIC, ChainAVAX, ChainSOL, ChainAPTOS}
+	return []WalletChain{ChainETH, ChainMATIC, ChainAVAX, ChainSOL, ChainAPTOS, ChainBASE}
 }
 
 // GetTestnetChains returns testnet chains
 func GetTestnetChains() []WalletChain {
-	return []WalletChain{ChainETHSepolia, ChainSOLDevnet, ChainAPTOSTestnet}
+	return []WalletChain{ChainETHSepolia, ChainSOLDevnet, ChainAPTOSTestnet, ChainMATICAmoy, ChainBASESepolia}
 }
 
 // IsValid checks if the chain is supported
@@ -62,7 +65,7 @@ func (c WalletChain) IsTestnet() bool {
 // GetChainFamily returns the chain family (EVM, Solana, Aptos)
 func (c WalletChain) GetChainFamily() string {
 	switch c {
-	case ChainETH, ChainETHSepolia, ChainMATIC, ChainAVAX:
+	case ChainETH, ChainETHSepolia, ChainMATIC, ChainMATICAmoy, ChainAVAX, ChainBASE, ChainBASESepolia:
 		return "EVM"
 	case ChainSOL, ChainSOLDevnet:
 		return "Solana"
@@ -355,7 +358,8 @@ type WalletProvisioningJobResponse struct {
 
 // CircleWalletSetRequest represents Circle wallet set creation request
 type CircleWalletSetRequest struct {
-	Name string `json:"name"`
+	Name                   string `json:"name"`
+	EntitySecretCiphertext string `json:"entitySecretCiphertext"`
 }
 
 // CircleWalletSetResponse represents Circle wallet set response

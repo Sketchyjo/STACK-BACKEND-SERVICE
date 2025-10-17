@@ -261,15 +261,16 @@ func NewWalletSetRepository(db *sql.DB, logger *zap.Logger) *WalletSetRepository
 func (r *WalletSetRepository) Create(ctx context.Context, walletSet *entities.WalletSet) error {
 	query := `
 		INSERT INTO wallet_sets (
-			id, name, circle_wallet_set_id, status, created_at, updated_at
+			id, name, circle_wallet_set_id, entity_secret_ciphertext, status, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6
+			$1, $2, $3, $4, $5, $6, $7
 		)`
 
 	_, err := r.db.ExecContext(ctx, query,
 		walletSet.ID,
-		"default_wallet_set", // TODO: Add Name field to WalletSet entity
+		walletSet.Name,
 		walletSet.CircleWalletSetID,
+		walletSet.EntitySecretCiphertext,
 		string(walletSet.Status),
 		walletSet.CreatedAt,
 		walletSet.UpdatedAt,
@@ -287,17 +288,17 @@ func (r *WalletSetRepository) Create(ctx context.Context, walletSet *entities.Wa
 // GetByID retrieves a wallet set by ID
 func (r *WalletSetRepository) GetByID(ctx context.Context, id uuid.UUID) (*entities.WalletSet, error) {
 	query := `
-		SELECT id, name, circle_wallet_set_id, status, created_at, updated_at
+		SELECT id, name, circle_wallet_set_id, entity_secret_ciphertext, status, created_at, updated_at
 		FROM wallet_sets 
 		WHERE id = $1`
 
 	walletSet := &entities.WalletSet{}
-	var name string // TODO: Add Name field to WalletSet entity
 
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&walletSet.ID,
-		&name,
+		&walletSet.Name,
 		&walletSet.CircleWalletSetID,
+		&walletSet.EntitySecretCiphertext,
 		&walletSet.Status,
 		&walletSet.CreatedAt,
 		&walletSet.UpdatedAt,
@@ -317,17 +318,17 @@ func (r *WalletSetRepository) GetByID(ctx context.Context, id uuid.UUID) (*entit
 // GetByCircleWalletSetID retrieves a wallet set by Circle wallet set ID
 func (r *WalletSetRepository) GetByCircleWalletSetID(ctx context.Context, circleWalletSetID string) (*entities.WalletSet, error) {
 	query := `
-		SELECT id, name, circle_wallet_set_id, status, created_at, updated_at
+		SELECT id, name, circle_wallet_set_id, entity_secret_ciphertext, status, created_at, updated_at
 		FROM wallet_sets 
 		WHERE circle_wallet_set_id = $1`
 
 	walletSet := &entities.WalletSet{}
-	var name string // TODO: Add Name field to WalletSet entity
 
 	err := r.db.QueryRowContext(ctx, query, circleWalletSetID).Scan(
 		&walletSet.ID,
-		&name,
+		&walletSet.Name,
 		&walletSet.CircleWalletSetID,
+		&walletSet.EntitySecretCiphertext,
 		&walletSet.Status,
 		&walletSet.CreatedAt,
 		&walletSet.UpdatedAt,
@@ -348,19 +349,19 @@ func (r *WalletSetRepository) GetByCircleWalletSetID(ctx context.Context, circle
 // GetActive retrieves the currently active wallet set
 func (r *WalletSetRepository) GetActive(ctx context.Context) (*entities.WalletSet, error) {
 	query := `
-		SELECT id, name, circle_wallet_set_id, status, created_at, updated_at
+		SELECT id, name, circle_wallet_set_id, entity_secret_ciphertext, status, created_at, updated_at
 		FROM wallet_sets 
 		WHERE status = $1
 		ORDER BY created_at DESC
 		LIMIT 1`
 
 	walletSet := &entities.WalletSet{}
-	var name string // TODO: Add Name field to WalletSet entity
 
 	err := r.db.QueryRowContext(ctx, query, string(entities.WalletSetStatusActive)).Scan(
 		&walletSet.ID,
-		&name,
+		&walletSet.Name,
 		&walletSet.CircleWalletSetID,
+		&walletSet.EntitySecretCiphertext,
 		&walletSet.Status,
 		&walletSet.CreatedAt,
 		&walletSet.UpdatedAt,
@@ -381,13 +382,14 @@ func (r *WalletSetRepository) GetActive(ctx context.Context) (*entities.WalletSe
 func (r *WalletSetRepository) Update(ctx context.Context, walletSet *entities.WalletSet) error {
 	query := `
 		UPDATE wallet_sets SET 
-			name = $2, circle_wallet_set_id = $3, status = $4, updated_at = $5
+			name = $2, circle_wallet_set_id = $3, entity_secret_ciphertext = $4, status = $5, updated_at = $6
 		WHERE id = $1`
 
 	_, err := r.db.ExecContext(ctx, query,
 		walletSet.ID,
-		"default_wallet_set", // TODO: Add Name field to WalletSet entity
+		walletSet.Name,
 		walletSet.CircleWalletSetID,
+		walletSet.EntitySecretCiphertext,
 		string(walletSet.Status),
 		time.Now(),
 	)

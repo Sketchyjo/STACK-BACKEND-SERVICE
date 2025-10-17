@@ -78,6 +78,11 @@ func main() {
 
 	// Initialize wallet provisioning worker and scheduler
 	workerConfig := walletprovisioning.DefaultConfig()
+	workerConfig.EntitySecretCiphertext = cfg.Circle.EntitySecretCiphertext
+	workerConfig.WalletSetNamePrefix = cfg.Circle.DefaultWalletSetName
+	workerConfig.ChainsToProvision = container.WalletService.SupportedChains()
+	workerConfig.DefaultWalletSetID = cfg.Circle.DefaultWalletSetID
+
 	worker := walletprovisioning.NewWorker(
 		container.WalletRepo,
 		container.WalletSetRepo,

@@ -41,6 +41,7 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 	// investingHandlers := handlers.NewInvestingHandlers(container.GetInvestingService(), container.Logger)
 	onboardingHandlers := handlers.NewOnboardingHandlers(container.GetOnboardingService(), container.ZapLog)
 	walletHandlers := handlers.NewWalletHandlers(container.GetWalletService(), container.ZapLog)
+	securityHandlers := handlers.NewSecurityHandlers(container.GetPasscodeService(), container.ZapLog)
 
 	// Initialize AI-CFO and ZeroG handlers
 	aicfoHandlers := handlers.NewAICfoHandler(container.GetAICfoService(), container.ZapLog)
@@ -66,6 +67,7 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 				*container.UserRepo,
 				container.GetVerificationService(),
 				*container.GetOnboardingJobService(),
+				container.GetOnboardingService(),
 				container.EmailService,
 				container.KYCProvider,
 			)
@@ -113,6 +115,22 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 				users.DELETE("/me", handlers.DeleteAccount(container.DB, container.Config, container.Logger))
 				users.POST("/me/enable-2fa", handlers.Enable2FA(container.DB, container.Config, container.Logger))
 				users.POST("/me/disable-2fa", handlers.Disable2FA(container.DB, container.Config, container.Logger))
+			}
+
+			// KYC status utilities (auth required but no KYC gate)
+			kycProtected := protected.Group("/kyc")
+			{
+				kycProtected.GET("/status", onboardingHandlers.GetKYCStatus)
+			}
+
+			// Security routes for passcode management
+			security := protected.Group("/security")
+			{
+				security.GET("/passcode", securityHandlers.GetPasscodeStatus)
+				security.POST("/passcode", securityHandlers.CreatePasscode)
+				security.PUT("/passcode", securityHandlers.UpdatePasscode)
+				security.POST("/passcode/verify", securityHandlers.VerifyPasscode)
+				security.DELETE("/passcode", securityHandlers.RemovePasscode)
 			}
 
 			// Funding routes (OpenAPI spec compliant)
@@ -177,6 +195,7 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 			// Cards and payments
 			cards := protected.Group("/cards")
 			{
+				cards.Use(middleware.RequireKYC(container.GetOnboardingService(), container.ZapLog))
 				cards.GET("/", handlers.GetCards(container.DB, container.Config, container.Logger))
 				cards.POST("/", handlers.CreateCard(container.DB, container.Config, container.Logger))
 				cards.GET("/:id", handlers.GetCard(container.DB, container.Config, container.Logger))
@@ -193,7 +212,9 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 				transactions.GET("/", handlers.GetTransactions(container.DB, container.Config, container.Logger))
 				transactions.GET("/:id", handlers.GetTransaction(container.DB, container.Config, container.Logger))
 				transactions.POST("/deposit", handlers.Deposit(container.DB, container.Config, container.Logger))
-				transactions.POST("/withdraw", handlers.Withdraw(container.DB, container.Config, container.Logger))
+				transactions.POST("/withdraw",
+					middleware.RequireKYC(container.GetOnboardingService(), container.ZapLog),
+					handlers.Withdraw(container.DB, container.Config, container.Logger))
 				transactions.POST("/transfer", handlers.Transfer(container.DB, container.Config, container.Logger))
 				transactions.POST("/swap", handlers.SwapTokens(container.DB, container.Config, container.Logger))
 			}

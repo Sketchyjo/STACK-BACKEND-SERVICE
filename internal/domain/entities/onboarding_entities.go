@@ -34,12 +34,12 @@ func (s OnboardingStatus) IsValid() bool {
 // CanTransitionTo checks if transition to target status is allowed
 func (s OnboardingStatus) CanTransitionTo(target OnboardingStatus) bool {
 	transitions := map[OnboardingStatus][]OnboardingStatus{
-		OnboardingStatusStarted:        {OnboardingStatusKYCPending},
-		OnboardingStatusKYCPending:     {OnboardingStatusKYCApproved, OnboardingStatusKYCRejected},
+		OnboardingStatusStarted:        {OnboardingStatusWalletsPending, OnboardingStatusKYCPending},
+		OnboardingStatusKYCPending:     {OnboardingStatusKYCApproved, OnboardingStatusKYCRejected, OnboardingStatusWalletsPending},
 		OnboardingStatusKYCApproved:    {OnboardingStatusWalletsPending},
-		OnboardingStatusKYCRejected:    {OnboardingStatusKYCPending},                             // Allow retry
-		OnboardingStatusWalletsPending: {OnboardingStatusCompleted, OnboardingStatusKYCRejected}, // Can fail back
-		OnboardingStatusCompleted:      {},                                                       // Terminal state
+		OnboardingStatusKYCRejected:    {OnboardingStatusKYCPending, OnboardingStatusWalletsPending}, // Allow retry or continue without KYC
+		OnboardingStatusWalletsPending: {OnboardingStatusCompleted},
+		OnboardingStatusCompleted:      {}, // Terminal state
 	}
 
 	allowedTargets, exists := transitions[s]
@@ -170,7 +170,7 @@ func (u *UserProfile) CanStartKYC() bool {
 	}
 
 	switch u.OnboardingStatus {
-	case OnboardingStatusStarted, OnboardingStatusKYCRejected:
+	case OnboardingStatusStarted, OnboardingStatusKYCRejected, OnboardingStatusWalletsPending, OnboardingStatusCompleted:
 		return true
 	case OnboardingStatusKYCPending:
 		// Allow initial submission when we're in the pending state but nothing was sent yet
@@ -182,7 +182,19 @@ func (u *UserProfile) CanStartKYC() bool {
 
 // CanCreateWallets checks if user can proceed to wallet creation
 func (u *UserProfile) CanCreateWallets() bool {
-	return u.OnboardingStatus == OnboardingStatusKYCApproved && u.KYCApprovedAt != nil
+	if !u.EmailVerified {
+		return false
+	}
+
+	// Wallet provisioning is allowed once identity basics are verified, even if KYC is optional
+	switch u.OnboardingStatus {
+	case OnboardingStatusWalletsPending, OnboardingStatusCompleted:
+		return true
+	case OnboardingStatusStarted, OnboardingStatusKYCPending, OnboardingStatusKYCApproved, OnboardingStatusKYCRejected:
+		return true
+	default:
+		return false
+	}
 }
 
 // GetFullName returns the user's full name if available
@@ -333,6 +345,21 @@ type WalletStatusSummary struct {
 	FailedWallets   int               `json:"failedWallets"`
 	SupportedChains []string          `json:"supportedChains"`
 	WalletsByChain  map[string]string `json:"walletsByChain"` // chain -> status
+}
+
+// KYCStatusResponse captures a user's verification state with contextual guidance
+type KYCStatusResponse struct {
+	UserID            uuid.UUID  `json:"userId"`
+	Status            string     `json:"status"`
+	Verified          bool       `json:"verified"`
+	HasSubmitted      bool       `json:"hasSubmitted"`
+	RequiresKYC       bool       `json:"requiresKyc"`
+	RequiredFor       []string   `json:"requiredFor"`
+	LastSubmittedAt   *time.Time `json:"lastSubmittedAt,omitempty"`
+	ApprovedAt        *time.Time `json:"approvedAt,omitempty"`
+	RejectionReason   *string    `json:"rejectionReason,omitempty"`
+	ProviderReference *string    `json:"providerReference,omitempty"`
+	NextSteps         []string   `json:"nextSteps,omitempty"`
 }
 
 // KYCSubmitRequest represents KYC submission request

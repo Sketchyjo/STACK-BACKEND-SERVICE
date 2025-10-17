@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stack-service/stack_service/internal/domain/entities"
 	domainrepos "github.com/stack-service/stack_service/internal/domain/repositories"
 	"github.com/stack-service/stack_service/internal/domain/services"
 	"github.com/stack-service/stack_service/internal/domain/services/funding"
 	"github.com/stack-service/stack_service/internal/domain/services/investing"
 	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
+	"github.com/stack-service/stack_service/internal/domain/services/passcode"
 	"github.com/stack-service/stack_service/internal/domain/services/wallet"
 	"github.com/stack-service/stack_service/internal/infrastructure/adapters"
 	"github.com/stack-service/stack_service/internal/infrastructure/cache"
@@ -75,6 +77,7 @@ type Container struct {
 	OnboardingService    *onboarding.Service
 	OnboardingJobService *services.OnboardingJobService
 	VerificationService  services.VerificationService
+	PasscodeService      *passcode.Service
 	WalletService        *wallet.Service
 	FundingService       *funding.Service
 	InvestingService     *investing.Service
@@ -115,6 +118,7 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 	circleConfig := circle.Config{
 		APIKey:      cfg.Circle.APIKey,
 		Environment: cfg.Circle.Environment,
+		BaseURL:     cfg.Circle.BaseURL,
 	}
 	circleClient := circle.NewClient(circleConfig, zapLog)
 
@@ -252,6 +256,14 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 
 // initializeDomainServices initializes all domain services with their dependencies
 func (c *Container) initializeDomainServices() error {
+	defaultWalletChains := convertWalletChains(c.Config.Circle.SupportedChains, c.ZapLog)
+	walletServiceConfig := wallet.Config{
+		EntitySecretCiphertext: c.Config.Circle.EntitySecretCiphertext,
+		WalletSetNamePrefix:    c.Config.Circle.DefaultWalletSetName,
+		SupportedChains:        defaultWalletChains,
+		DefaultWalletSetID:     c.Config.Circle.DefaultWalletSetID,
+	}
+
 	// Initialize wallet service first (no dependencies on other domain services)
 	c.WalletService = wallet.NewService(
 		c.WalletRepo,
@@ -260,6 +272,7 @@ func (c *Container) initializeDomainServices() error {
 		c.CircleClient,
 		c.AuditService,
 		c.ZapLog,
+		walletServiceConfig,
 	)
 
 	// Initialize onboarding service (depends on wallet service)
@@ -271,6 +284,14 @@ func (c *Container) initializeDomainServices() error {
 		c.KYCProvider,
 		c.EmailService,
 		c.AuditService,
+		c.ZapLog,
+		append([]entities.WalletChain(nil), walletServiceConfig.SupportedChains...),
+	)
+
+	// Initialize passcode service for transaction security
+	c.PasscodeService = passcode.NewService(
+		c.UserRepo,
+		c.RedisClient,
 		c.ZapLog,
 	)
 
@@ -325,6 +346,11 @@ func (c *Container) GetOnboardingService() *onboarding.Service {
 	return c.OnboardingService
 }
 
+// GetPasscodeService returns the passcode service
+func (c *Container) GetPasscodeService() *passcode.Service {
+	return c.PasscodeService
+}
+
 // GetWalletService returns the wallet service
 func (c *Container) GetWalletService() *wallet.Service {
 	return c.WalletService
@@ -368,4 +394,47 @@ func (c *Container) GetVerificationService() services.VerificationService {
 // GetOnboardingJobService returns the onboarding job service
 func (c *Container) GetOnboardingJobService() *services.OnboardingJobService {
 	return c.OnboardingJobService
+}
+
+func convertWalletChains(raw []string, logger *zap.Logger) []entities.WalletChain {
+	if len(raw) == 0 {
+		logger.Warn("circle.supported_chains not configured; defaulting to ETH/MATIC/SOL/BASE")
+		return []entities.WalletChain{
+			entities.ChainETH,
+			entities.ChainMATIC,
+			entities.ChainSOL,
+			entities.ChainBASE,
+		}
+	}
+
+	normalized := make([]entities.WalletChain, 0, len(raw))
+	seen := make(map[entities.WalletChain]struct{})
+
+	for _, entry := range raw {
+		chain := entities.WalletChain(strings.TrimSpace(strings.ToUpper(entry)))
+		if chain == "" {
+			continue
+		}
+		if !chain.IsValid() {
+			logger.Warn("Ignoring unsupported wallet chain from configuration", zap.String("chain", string(chain)))
+			continue
+		}
+		if _, ok := seen[chain]; ok {
+			continue
+		}
+		seen[chain] = struct{}{}
+		normalized = append(normalized, chain)
+	}
+
+	if len(normalized) == 0 {
+		logger.Warn("circle.supported_chains contained no valid entries; defaulting to ETH/MATIC/SOL/BASE")
+		return []entities.WalletChain{
+			entities.ChainETH,
+			entities.ChainMATIC,
+			entities.ChainSOL,
+			entities.ChainBASE,
+		}
+	}
+
+	return normalized
 }

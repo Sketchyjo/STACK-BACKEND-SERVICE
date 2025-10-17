@@ -650,3 +650,175 @@ func (r *UserRepository) DeactivateUser(ctx context.Context, userID uuid.UUID) e
 	r.logger.Info("User deactivated", zap.String("user_id", userID.String()))
 	return nil
 }
+
+// GetPasscodeMetadata retrieves persisted passcode metadata for a user
+func (r *UserRepository) GetPasscodeMetadata(ctx context.Context, userID uuid.UUID) (*entities.PasscodeMetadata, error) {
+	query := `
+		SELECT passcode_hash, passcode_failed_attempts, passcode_locked_until, passcode_updated_at
+		FROM users
+		WHERE id = $1`
+
+	var passcodeHash sql.NullString
+	var failedAttempts sql.NullInt64
+	var lockedUntil sql.NullTime
+	var updatedAt sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(
+		&passcodeHash,
+		&failedAttempts,
+		&lockedUntil,
+		&updatedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("user not found")
+		}
+		r.logger.Error("Failed to load passcode metadata", zap.Error(err), zap.String("user_id", userID.String()))
+		return nil, fmt.Errorf("failed to load passcode metadata: %w", err)
+	}
+
+	meta := &entities.PasscodeMetadata{}
+
+	if passcodeHash.Valid {
+		hash := passcodeHash.String
+		meta.HashedPasscode = &hash
+	}
+	if failedAttempts.Valid {
+		meta.FailedAttempts = int(failedAttempts.Int64)
+	}
+	if lockedUntil.Valid {
+		meta.LockedUntil = &lockedUntil.Time
+	}
+	if updatedAt.Valid {
+		meta.UpdatedAt = &updatedAt.Time
+	}
+
+	return meta, nil
+}
+
+// UpdatePasscodeHash persists a new passcode hash and resets security counters
+func (r *UserRepository) UpdatePasscodeHash(ctx context.Context, userID uuid.UUID, hash string, updatedAt time.Time) error {
+	query := `
+		UPDATE users
+		SET passcode_hash = $2,
+			passcode_failed_attempts = 0,
+			passcode_locked_until = NULL,
+			passcode_updated_at = $3,
+			updated_at = NOW()
+		WHERE id = $1`
+
+	res, err := r.db.ExecContext(ctx, query, userID, hash, updatedAt)
+	if err != nil {
+		r.logger.Error("Failed to update passcode hash", zap.Error(err), zap.String("user_id", userID.String()))
+		return fmt.Errorf("failed to update passcode hash: %w", err)
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to verify passcode hash update: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	return nil
+}
+
+// ResetPasscodeFailures clears passcode failure counters and lock state
+func (r *UserRepository) ResetPasscodeFailures(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE users
+		SET passcode_failed_attempts = 0,
+			passcode_locked_until = NULL,
+			updated_at = NOW()
+		WHERE id = $1`
+
+	_, err := r.db.ExecContext(ctx, query, userID)
+	if err != nil {
+		r.logger.Error("Failed to reset passcode failures", zap.Error(err), zap.String("user_id", userID.String()))
+		return fmt.Errorf("failed to reset passcode failures: %w", err)
+	}
+
+	return nil
+}
+
+// IncrementPasscodeFailures increases the failure counter and optionally locks the passcode
+func (r *UserRepository) IncrementPasscodeFailures(ctx context.Context, userID uuid.UUID, failureCountThreshold int, lockUntil *time.Time) (*entities.PasscodeMetadata, error) {
+	query := `
+		UPDATE users
+		SET passcode_failed_attempts = passcode_failed_attempts + 1,
+			passcode_locked_until = CASE
+				WHEN passcode_failed_attempts + 1 >= $2 THEN COALESCE($3, passcode_locked_until)
+				ELSE passcode_locked_until
+			END,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING passcode_hash, passcode_failed_attempts, passcode_locked_until, passcode_updated_at`
+
+	var passcodeHash sql.NullString
+	var failedAttempts int
+	var lockedUntil sql.NullTime
+	var updatedAt sql.NullTime
+
+	lockValue := interface{}(nil)
+	if lockUntil != nil {
+		lockValue = *lockUntil
+	}
+
+	err := r.db.QueryRowContext(ctx, query, userID, failureCountThreshold, lockValue).Scan(
+		&passcodeHash,
+		&failedAttempts,
+		&lockedUntil,
+		&updatedAt,
+	)
+
+	if err != nil {
+		r.logger.Error("Failed to increment passcode failures", zap.Error(err), zap.String("user_id", userID.String()))
+		return nil, fmt.Errorf("failed to increment passcode failures: %w", err)
+	}
+
+	meta := &entities.PasscodeMetadata{
+		FailedAttempts: failedAttempts,
+	}
+	if passcodeHash.Valid {
+		hash := passcodeHash.String
+		meta.HashedPasscode = &hash
+	}
+	if lockedUntil.Valid {
+		meta.LockedUntil = &lockedUntil.Time
+	}
+	if updatedAt.Valid {
+		meta.UpdatedAt = &updatedAt.Time
+	}
+
+	return meta, nil
+}
+
+// ClearPasscode removes the stored passcode and resets counters
+func (r *UserRepository) ClearPasscode(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE users
+		SET passcode_hash = NULL,
+			passcode_failed_attempts = 0,
+			passcode_locked_until = NULL,
+			passcode_updated_at = NULL,
+			updated_at = NOW()
+		WHERE id = $1`
+
+	res, err := r.db.ExecContext(ctx, query, userID)
+	if err != nil {
+		r.logger.Error("Failed to clear passcode", zap.Error(err), zap.String("user_id", userID.String()))
+		return fmt.Errorf("failed to clear passcode: %w", err)
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to verify passcode clear rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	return nil
+}
