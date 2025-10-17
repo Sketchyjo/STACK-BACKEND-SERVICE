@@ -96,7 +96,7 @@ func SetupStackRoutes(db *sql.DB, cfg *config.Config, log *logger.Logger) *gin.E
 		// NOTE: These are not in the MVP OpenAPI spec but needed for a complete system
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/login", handlers.Login(db, cfg, log))
+			auth.POST("/login", handlers.Login(db, cfg, log, nil))
 			auth.POST("/refresh", handlers.RefreshToken(db, cfg, log))
 			auth.POST("/logout", handlers.Logout(db, cfg, log))
 		}

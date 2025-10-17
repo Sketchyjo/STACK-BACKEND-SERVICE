@@ -70,12 +70,12 @@ func (r *UserRepository) Create(ctx context.Context, user *entities.UserProfile)
 // GetByID retrieves a user by ID
 func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*entities.UserProfile, error) {
 	query := `
-		SELECT id, email, phone, first_name, last_name, date_of_birth,
-		       auth_provider_id, email_verified, phone_verified,
-		       onboarding_status, kyc_status, kyc_approved_at, kyc_rejection_reason,
-		       created_at, updated_at
-		FROM users 
-		WHERE id = $1`
+        SELECT id, email, phone, first_name, last_name, date_of_birth,
+               auth_provider_id, email_verified, phone_verified,
+               onboarding_status, kyc_status, kyc_approved_at, kyc_rejection_reason,
+               is_active, created_at, updated_at
+        FROM users 
+        WHERE id = $1`
 
 	user := &entities.UserProfile{}
 	var kycApprovedAt sql.NullTime
@@ -97,6 +97,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*entities.U
 		&user.KYCStatus,
 		&kycApprovedAt,
 		&kycRejectionReason,
+		&user.IsActive,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -123,12 +124,12 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*entities.U
 // GetByEmail retrieves a user by email
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*entities.UserProfile, error) {
 	query := `
-		SELECT id, email, phone, first_name, last_name, date_of_birth,
-		       auth_provider_id, email_verified, phone_verified,
-		       onboarding_status, kyc_status, kyc_approved_at, kyc_rejection_reason,
-		       created_at, updated_at
-		FROM users 
-		WHERE email = $1`
+        SELECT id, email, phone, first_name, last_name, date_of_birth,
+               auth_provider_id, email_verified, phone_verified,
+               onboarding_status, kyc_status, kyc_approved_at, kyc_rejection_reason,
+               is_active, created_at, updated_at
+        FROM users 
+        WHERE email = $1`
 
 	user := &entities.UserProfile{}
 	var kycApprovedAt sql.NullTime
@@ -150,6 +151,7 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*entitie
 		&user.KYCStatus,
 		&kycApprovedAt,
 		&kycRejectionReason,
+		&user.IsActive,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -175,12 +177,12 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*entitie
 // GetByAuthProviderID retrieves a user by auth provider ID
 func (r *UserRepository) GetByAuthProviderID(ctx context.Context, authProviderID string) (*entities.UserProfile, error) {
 	query := `
-		SELECT id, email, phone, first_name, last_name, date_of_birth,
-		       auth_provider_id, email_verified, phone_verified,
-		       onboarding_status, kyc_status, kyc_approved_at, kyc_rejection_reason,
-		       created_at, updated_at
-		FROM users 
-		WHERE auth_provider_id = $1`
+        SELECT id, email, phone, first_name, last_name, date_of_birth,
+               auth_provider_id, email_verified, phone_verified,
+               onboarding_status, kyc_status, kyc_approved_at, kyc_rejection_reason,
+               is_active, created_at, updated_at
+        FROM users 
+        WHERE auth_provider_id = $1`
 
 	user := &entities.UserProfile{}
 	var kycApprovedAt sql.NullTime
@@ -202,6 +204,7 @@ func (r *UserRepository) GetByAuthProviderID(ctx context.Context, authProviderID
 		&user.KYCStatus,
 		&kycApprovedAt,
 		&kycRejectionReason,
+		&user.IsActive,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -291,6 +294,29 @@ func (r *UserRepository) UpdateKYCStatus(ctx context.Context, userID uuid.UUID, 
 	}
 
 	r.logger.Debug("KYC status updated", zap.String("user_id", userID.String()), zap.String("status", status))
+	return nil
+}
+
+// UpdateKYCProvider sets the KYC provider reference and status
+func (r *UserRepository) UpdateKYCProvider(ctx context.Context, userID uuid.UUID, providerRef string, status entities.KYCStatus) error {
+	query := `
+		UPDATE users SET 
+			kyc_provider_ref = $2,
+			kyc_status = $3,
+			updated_at = $4
+		WHERE id = $1`
+
+	_, err := r.db.ExecContext(ctx, query, userID, providerRef, string(status), time.Now())
+	if err != nil {
+		r.logger.Error("Failed to update KYC provider reference", zap.Error(err), zap.String("user_id", userID.String()))
+		return fmt.Errorf("failed to update KYC provider reference: %w", err)
+	}
+
+	r.logger.Info("Updated KYC provider reference",
+		zap.String("user_id", userID.String()),
+		zap.String("provider_ref", providerRef),
+		zap.String("status", string(status)))
+
 	return nil
 }
 
@@ -429,7 +455,7 @@ func (r *UserRepository) GetUserByEmailForLogin(ctx context.Context, email strin
 // PhoneExists checks if a phone number already exists
 func (r *UserRepository) PhoneExists(ctx context.Context, phone string) (bool, error) {
 	query := `SELECT EXISTS(SELECT 1 FROM users WHERE phone = $1 AND is_active = true)`
-	
+
 	var exists bool
 	err := r.db.QueryRowContext(ctx, query, phone).Scan(&exists)
 	if err != nil {

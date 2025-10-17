@@ -1,9 +1,9 @@
 package handlers
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -12,8 +12,6 @@ import (
 
 	"github.com/stack-service/stack_service/internal/domain/entities"
 	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
-	"github.com/stack-service/stack_service/internal/infrastructure/config"
-	"github.com/stack-service/stack_service/pkg/logger"
 )
 
 // OnboardingHandlers contains the onboarding-related HTTP handlers
@@ -142,6 +140,16 @@ func (h *OnboardingHandlers) GetOnboardingStatus(c *gin.Context) {
 		h.logger.Error("Failed to get onboarding status",
 			zap.Error(err),
 			zap.String("user_id", userID.String()))
+
+		// Handle inactive account explicitly
+		if strings.Contains(strings.ToLower(err.Error()), "inactive") {
+			c.JSON(http.StatusForbidden, entities.ErrorResponse{
+				Code:    "USER_INACTIVE",
+				Message: "User account is inactive",
+				Details: map[string]interface{}{"user_id": userID.String()},
+			})
+			return
+		}
 
 		if isUserNotFoundError(err) {
 			c.JSON(http.StatusNotFound, entities.ErrorResponse{
@@ -298,24 +306,67 @@ func (h *OnboardingHandlers) ProcessKYCCallback(c *gin.Context) {
 
 	// Extract status and rejection reasons from callback
 	// This would depend on the specific KYC provider's callback format
-	status := entities.KYCStatusProcessing // default
+	status := entities.KYCStatusProcessing
 	var rejectionReasons []string
 
-	if statusStr, ok := callbackData["status"].(string); ok {
-		switch statusStr {
-		case "approved", "passed":
-			status = entities.KYCStatusApproved
-		case "rejected", "failed":
-			status = entities.KYCStatusRejected
-			if reasons, ok := callbackData["rejection_reasons"].([]interface{}); ok {
-				for _, reason := range reasons {
-					if reasonStr, ok := reason.(string); ok {
-						rejectionReasons = append(rejectionReasons, reasonStr)
+	var reviewResult map[string]interface{}
+	if raw, ok := callbackData["reviewResult"]; ok {
+		if rr, ok := raw.(map[string]interface{}); ok {
+			reviewResult = rr
+		}
+	}
+	if reviewResult == nil {
+		if payloadRaw, ok := callbackData["payload"].(map[string]interface{}); ok {
+			if rr, ok := payloadRaw["reviewResult"].(map[string]interface{}); ok {
+				reviewResult = rr
+			}
+		}
+	}
+
+	if reviewResult != nil {
+		if answer, ok := reviewResult["reviewAnswer"].(string); ok {
+			switch strings.ToUpper(strings.TrimSpace(answer)) {
+			case "GREEN":
+				status = entities.KYCStatusApproved
+			case "RED":
+				status = entities.KYCStatusRejected
+			}
+		}
+		if labels, ok := reviewResult["rejectLabels"].([]interface{}); ok {
+			for _, label := range labels {
+				switch v := label.(type) {
+				case map[string]interface{}:
+					if desc, ok := v["description"].(string); ok && desc != "" {
+						rejectionReasons = append(rejectionReasons, desc)
+					} else if code, ok := v["code"].(string); ok && code != "" {
+						rejectionReasons = append(rejectionReasons, code)
+					}
+				case string:
+					if strings.TrimSpace(v) != "" {
+						rejectionReasons = append(rejectionReasons, strings.TrimSpace(v))
 					}
 				}
 			}
-		case "processing", "pending":
-			status = entities.KYCStatusProcessing
+		}
+	}
+
+	if status == entities.KYCStatusProcessing {
+		if statusStr, ok := callbackData["status"].(string); ok {
+			switch strings.ToLower(statusStr) {
+			case "approved", "passed":
+				status = entities.KYCStatusApproved
+			case "rejected", "failed":
+				status = entities.KYCStatusRejected
+				if reasons, ok := callbackData["rejection_reasons"].([]interface{}); ok {
+					for _, reason := range reasons {
+						if reasonStr, ok := reason.(string); ok {
+							rejectionReasons = append(rejectionReasons, reasonStr)
+						}
+					}
+				}
+			case "processing", "pending":
+				status = entities.KYCStatusProcessing
+			}
 		}
 	}
 
@@ -411,24 +462,4 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
-}
-
-// Legacy handler factory for compatibility
-func StartOnboarding(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
-	// This would be replaced with proper dependency injection
-	return func(c *gin.Context) {
-		c.JSON(http.StatusNotImplemented, gin.H{
-			"error":   "Not implemented yet",
-			"message": "Use OnboardingHandlers.StartOnboarding instead",
-		})
-	}
-}
-
-func GetOnboardingStatus(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.JSON(http.StatusNotImplemented, gin.H{
-			"error":   "Not implemented yet",
-			"message": "Use OnboardingHandlers.GetOnboardingStatus instead",
-		})
-	}
 }

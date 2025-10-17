@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -30,6 +31,8 @@ type AuthSignupHandlers struct {
 	userRepo             repositories.UserRepository
 	verificationService  services.VerificationService
 	onboardingJobService services.OnboardingJobService
+	emailService         *adapters.EmailService
+	kycProvider          *adapters.KYCProvider
 }
 
 // NewAuthSignupHandlers creates a new instance of AuthSignupHandlers
@@ -40,6 +43,8 @@ func NewAuthSignupHandlers(
 	userRepo repositories.UserRepository,
 	verificationService services.VerificationService,
 	onboardingJobService services.OnboardingJobService,
+	emailService *adapters.EmailService,
+	kycProvider *adapters.KYCProvider,
 ) *AuthSignupHandlers {
 	return &AuthSignupHandlers{
 		db:                   db,
@@ -48,6 +53,8 @@ func NewAuthSignupHandlers(
 		userRepo:             userRepo,
 		verificationService:  verificationService,
 		onboardingJobService: onboardingJobService,
+		emailService:         emailService,
+		kycProvider:          kycProvider,
 	}
 }
 
@@ -92,78 +99,122 @@ func (h *AuthSignupHandlers) Register(c *gin.Context) {
 		return
 	}
 
-	// Check if user already exists
-	var identifier string
-	var identifierType string
-	var exists bool
-	var err error
+	identifier := ""
+	identifierType := ""
+	var existingUser *entities.UserProfile
 
 	if req.Email != nil {
-		identifier = *req.Email
+		identifier = strings.TrimSpace(*req.Email)
 		identifierType = "email"
-		exists, err = h.userRepo.EmailExists(ctx, identifier)
+
+		var err error
+		existingUser, err = h.userRepo.GetByEmail(ctx, identifier)
+		if err != nil {
+			if !isUserNotFoundError(err) {
+				h.logger.Error("Failed to check existing user by email", zap.Error(err), zap.String("email", identifier))
+				c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+					Code:    "INTERNAL_ERROR",
+					Message: "Internal server error",
+				})
+				return
+			}
+			existingUser = nil
+		}
 	} else {
-		identifier = *req.Phone
+		identifier = strings.TrimSpace(*req.Phone)
 		identifierType = "phone"
-		exists, err = h.userRepo.PhoneExists(ctx, identifier)
+
+		exists, err := h.userRepo.PhoneExists(ctx, identifier)
+		if err != nil {
+			h.logger.Error("Failed to check phone existence", zap.Error(err), zap.String("phone", identifier))
+			c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+				Code:    "INTERNAL_ERROR",
+				Message: "Internal server error",
+			})
+			return
+		}
+
+		if exists {
+			c.JSON(http.StatusConflict, entities.ErrorResponse{
+				Code:    "USER_EXISTS",
+				Message: fmt.Sprintf("User already exists with this %s", identifierType),
+				Details: map[string]interface{}{identifierType: identifier},
+			})
+			return
+		}
 	}
 
-	if err != nil {
-		h.logger.Error("Failed to check identifier existence", zap.Error(err), zap.String("identifier", identifier))
-		c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
-			Code:    "INTERNAL_ERROR",
-			Message: "Internal server error",
+	if identifier == "" {
+		c.JSON(http.StatusBadRequest, entities.ErrorResponse{
+			Code:    "VALIDATION_ERROR",
+			Message: fmt.Sprintf("%s cannot be empty", identifierType),
 		})
 		return
 	}
 
-	if exists {
-		c.JSON(http.StatusConflict, entities.ErrorResponse{
-			Code:    "USER_EXISTS",
-			Message: fmt.Sprintf("User already exists with this %s", identifierType),
-			Details: map[string]interface{}{identifierType: identifier},
+	if existingUser != nil {
+		if existingUser.EmailVerified {
+			c.JSON(http.StatusConflict, entities.ErrorResponse{
+				Code:    "USER_EXISTS",
+				Message: fmt.Sprintf("User already exists with this %s", identifierType),
+				Details: map[string]interface{}{identifierType: identifier},
+			})
+			return
+		}
+
+		passwordHash, err := crypto.HashPassword(req.Password)
+		if err != nil {
+			h.logger.Error("Failed to hash password for existing unverified user", zap.Error(err), zap.String("identifier", identifier))
+			c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+				Code:    "PASSWORD_HASH_FAILED",
+				Message: "Failed to process password",
+			})
+			return
+		}
+
+		if err := h.userRepo.UpdatePassword(ctx, existingUser.ID, passwordHash); err != nil {
+			h.logger.Error("Failed to refresh password for existing unverified user", zap.Error(err), zap.String("user_id", existingUser.ID.String()))
+			c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+				Code:    "USER_UPDATE_FAILED",
+				Message: "Failed to update existing account",
+			})
+			return
+		}
+
+		if existingUser.OnboardingStatus != entities.OnboardingStatusStarted {
+			if err := h.userRepo.UpdateOnboardingStatus(ctx, existingUser.ID, entities.OnboardingStatusStarted); err != nil {
+				h.logger.Warn("Failed to reset onboarding status for existing unverified user",
+					zap.Error(err),
+					zap.String("user_id", existingUser.ID.String()))
+			}
+		}
+
+		if _, err := h.verificationService.GenerateAndSendCode(ctx, identifierType, identifier); err != nil {
+			h.logger.Error("Failed to send verification code for existing unverified user", zap.Error(err), zap.String("identifier", identifier))
+			c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+				Code:    "VERIFICATION_SEND_FAILED",
+				Message: "Failed to send verification code. Please try again.",
+			})
+			return
+		}
+
+		h.logger.Info("Resent verification code for existing unverified user", zap.String("user_id", existingUser.ID.String()), zap.String("identifier", identifier))
+		c.JSON(http.StatusAccepted, entities.SignUpResponse{
+			Message:    fmt.Sprintf("Verification code sent to %s. Please verify your account.", identifier),
+			Identifier: identifier,
 		})
 		return
 	}
 
-	// Hash password
-	passwordHash, err := crypto.HashPassword(req.Password)
-	if err != nil {
-		h.logger.Error("Failed to hash password", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
-			Code:    "PASSWORD_HASH_FAILED",
-			Message: "Failed to process password",
-		})
-		return
-	}
-
-	// Create user entity (initially unverified)
-	user := &entities.User{
-		ID:               uuid.New(),
-		Email:            "",
-		Phone:            nil,
-		PasswordHash:     passwordHash,
-		EmailVerified:    false,
-		PhoneVerified:    false,
-		OnboardingStatus: entities.OnboardingStatusStarted,
-		KYCStatus:        string(entities.KYCStatusPending),
-		Role:             "user",
-		IsActive:         true,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-	}
-
-	if req.Email != nil {
-		user.Email = *req.Email
-	}
-	if req.Phone != nil {
-		user.Phone = req.Phone
+	email := ""
+	if identifierType == "email" {
+		email = identifier
 	}
 
 	// Store user in DB (unverified)
-	_, err = h.userRepo.CreateUserFromAuth(ctx, &entities.RegisterRequest{
-		Email:    user.Email,
-		Phone:    user.Phone,
+	registeredUser, err := h.userRepo.CreateUserFromAuth(ctx, &entities.RegisterRequest{
+		Email:    email,
+		Phone:    req.Phone,
 		Password: req.Password,
 	})
 	if err != nil {
@@ -174,6 +225,8 @@ func (h *AuthSignupHandlers) Register(c *gin.Context) {
 		})
 		return
 	}
+
+	h.bootstrapKYCApplicant(ctx, registeredUser)
 
 	// Send verification code
 	_, err = h.verificationService.GenerateAndSendCode(ctx, identifierType, identifier)
@@ -186,11 +239,48 @@ func (h *AuthSignupHandlers) Register(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("User signed up and verification code sent", zap.String("user_id", user.ID.String()), zap.String("identifier", identifier))
+	if registeredUser.Email != "" && h.emailService != nil {
+		if err := h.emailService.SendWelcomeEmail(ctx, registeredUser.Email); err != nil {
+			h.logger.Warn("Failed to send welcome email", zap.Error(err), zap.String("email", registeredUser.Email))
+		}
+	}
+
+	h.logger.Info("User signed up and verification code sent", zap.String("user_id", registeredUser.ID.String()), zap.String("identifier", identifier))
 	c.JSON(http.StatusAccepted, entities.SignUpResponse{
 		Message:    fmt.Sprintf("Verification code sent to %s. Please verify your account.", identifier),
 		Identifier: identifier,
 	})
+}
+
+func (h *AuthSignupHandlers) bootstrapKYCApplicant(ctx context.Context, user *entities.User) {
+	if h.kycProvider == nil || user == nil {
+		return
+	}
+
+	if strings.ToLower(h.cfg.KYC.Provider) != "sumsub" {
+		return
+	}
+
+	applicantID, err := h.kycProvider.EnsureApplicant(ctx, user.ID, nil)
+	if err != nil {
+		h.logger.Warn("Failed to initialize KYC applicant", zap.Error(err), zap.String("user_id", user.ID.String()))
+		return
+	}
+	if applicantID == "" {
+		h.logger.Debug("No KYC applicant created for provider",
+			zap.String("user_id", user.ID.String()),
+			zap.String("provider", strings.ToLower(h.cfg.KYC.Provider)))
+		return
+	}
+
+	if err := h.userRepo.UpdateKYCProvider(ctx, user.ID, applicantID, entities.KYCStatusProcessing); err != nil {
+		h.logger.Warn("Failed to update user with KYC provider reference", zap.Error(err), zap.String("user_id", user.ID.String()))
+		return
+	}
+
+	h.logger.Info("Initialized KYC applicant with Sumsub",
+		zap.String("user_id", user.ID.String()),
+		zap.String("provider_ref", applicantID))
 }
 
 // VerifyCode handles verification code submission
@@ -458,7 +548,7 @@ func (h *AuthSignupHandlers) ResendCode(c *gin.Context) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
 // @Router /api/v1/auth/login [post]
-func Login(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
+func Login(db *sql.DB, cfg *config.Config, log *logger.Logger, emailService *adapters.EmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 
@@ -541,6 +631,31 @@ func Login(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
 			// Don't fail login for this
 		}
 
+		if emailService != nil && user.Email != "" {
+			alertDetails := adapters.LoginAlertDetails{
+				IP:        c.ClientIP(),
+				UserAgent: c.Request.UserAgent(),
+				LoginAt:   time.Now().UTC(),
+			}
+
+			if forwarded := strings.TrimSpace(c.GetHeader("X-Forwarded-For")); forwarded != "" && forwarded != alertDetails.IP {
+				alertDetails.ForwardedFor = forwarded
+			}
+
+			location := strings.TrimSpace(c.GetHeader("X-Geo-City"))
+			if location == "" {
+				location = strings.TrimSpace(c.GetHeader("X-Geo-Country"))
+			}
+			if location == "" {
+				location = strings.TrimSpace(c.GetHeader("CF-IPCountry"))
+			}
+			alertDetails.Location = location
+
+			if err := emailService.SendLoginAlertEmail(ctx, user.Email, alertDetails); err != nil {
+				log.Warnw("Failed to send login alert email", "error", err, "user_id", user.ID.String())
+			}
+		}
+
 		// Return success response
 		response := entities.AuthResponse{
 			User:         user.ToUserInfo(),
@@ -619,8 +734,25 @@ func ForgotPassword(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.Hand
 		token, _ := crypto.GenerateSecureToken()
 		// In a real app we'd store a hashed token and expiry in sessions or password_resets table
 		// Send email via adapter if configured
-		emailer := adapters.NewEmailService(log.Zap(), adapters.EmailServiceConfig{APIKey: cfg.Email.APIKey, FromEmail: cfg.Email.FromEmail, FromName: cfg.Email.FromName, Environment: cfg.Email.Environment, BaseURL: cfg.Email.BaseURL})
-		emailer.SendVerificationEmail(ctx, user.Email, token) // reuse verification for now
+		emailer, err := adapters.NewEmailService(log.Zap(), adapters.EmailServiceConfig{
+			Provider:    cfg.Email.Provider,
+			APIKey:      cfg.Email.APIKey,
+			FromEmail:   cfg.Email.FromEmail,
+			FromName:    cfg.Email.FromName,
+			Environment: cfg.Email.Environment,
+			BaseURL:     cfg.Email.BaseURL,
+			ReplyTo:     cfg.Email.ReplyTo,
+		})
+		if err != nil {
+			log.Errorw("Failed to initialize email service", "error", err)
+			c.JSON(http.StatusInternalServerError, entities.ErrorResponse{Code: "EMAIL_SERVICE_ERROR", Message: "Unable to send password reset email"})
+			return
+		}
+		if err := emailer.SendVerificationEmail(ctx, user.Email, token); err != nil {
+			log.Errorw("Failed to send password reset email", "error", err)
+			c.JSON(http.StatusInternalServerError, entities.ErrorResponse{Code: "EMAIL_SEND_FAILED", Message: "Unable to send password reset email"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "If an account exists, password reset instructions will be sent"})
 	}
 }

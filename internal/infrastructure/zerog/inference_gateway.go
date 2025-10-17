@@ -1,9 +1,11 @@
 package zerog
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -30,26 +32,26 @@ type InferenceGateway struct {
 
 // InferenceMetrics contains observability metrics for inference operations
 type InferenceMetrics struct {
-	RequestsTotal     metric.Int64Counter
-	RequestDuration   metric.Float64Histogram
-	RequestErrors     metric.Int64Counter
-	TokensUsed        metric.Int64Counter
-	TokensGenerated   metric.Int64Counter
-ActiveRequests    metric.Int64UpDownCounter
-	ModelUsage        metric.Int64Counter
+	RequestsTotal   metric.Int64Counter
+	RequestDuration metric.Float64Histogram
+	RequestErrors   metric.Int64Counter
+	TokensUsed      metric.Int64Counter
+	TokensGenerated metric.Int64Counter
+	ActiveRequests  metric.Int64UpDownCounter
+	ModelUsage      metric.Int64Counter
 }
 
 // OpenAICompatibleRequest represents an OpenAI-compatible API request
 type OpenAICompatibleRequest struct {
-	Model       string                   `json:"model"`
-	Messages    []ChatMessage            `json:"messages"`
-	MaxTokens   int                      `json:"max_tokens,omitempty"`
-	Temperature float64                  `json:"temperature,omitempty"`
-	TopP        float64                  `json:"top_p,omitempty"`
-	FrequencyPenalty float64             `json:"frequency_penalty,omitempty"`
-	PresencePenalty  float64             `json:"presence_penalty,omitempty"`
-	Stream      bool                     `json:"stream,omitempty"`
-	User        string                   `json:"user,omitempty"`
+	Model            string        `json:"model"`
+	Messages         []ChatMessage `json:"messages"`
+	MaxTokens        int           `json:"max_tokens,omitempty"`
+	Temperature      float64       `json:"temperature,omitempty"`
+	TopP             float64       `json:"top_p,omitempty"`
+	FrequencyPenalty float64       `json:"frequency_penalty,omitempty"`
+	PresencePenalty  float64       `json:"presence_penalty,omitempty"`
+	Stream           bool          `json:"stream,omitempty"`
+	User             string        `json:"user,omitempty"`
 }
 
 // ChatMessage represents a chat message in the conversation
@@ -60,13 +62,13 @@ type ChatMessage struct {
 
 // OpenAICompatibleResponse represents an OpenAI-compatible API response
 type OpenAICompatibleResponse struct {
-	ID                string           `json:"id"`
-	Object            string           `json:"object"`
-	Created           int64            `json:"created"`
-	Model             string           `json:"model"`
-	Choices           []Choice         `json:"choices"`
-	Usage             *Usage           `json:"usage,omitempty"`
-	SystemFingerprint string           `json:"system_fingerprint,omitempty"`
+	ID                string   `json:"id"`
+	Object            string   `json:"object"`
+	Created           int64    `json:"created"`
+	Model             string   `json:"model"`
+	Choices           []Choice `json:"choices"`
+	Usage             *Usage   `json:"usage,omitempty"`
+	SystemFingerprint string   `json:"system_fingerprint,omitempty"`
 }
 
 // Choice represents a completion choice
@@ -265,30 +267,58 @@ func (g *InferenceGateway) HealthCheck(ctx context.Context) (*entities.HealthSta
 	ctx, span := g.tracer.Start(ctx, "inference.health_check")
 	defer span.End()
 
-	g.logger.Debug("Performing 0G compute health check")
+	endpoint := strings.TrimSpace(g.config.BrokerEndpoint)
+	if endpoint == "" {
+		err := fmt.Errorf("broker endpoint not configured")
+		span.RecordError(err)
+		return nil, err
+	}
 
-	// TODO: Implement actual health check against 0G compute network
-	// For now, return a mock healthy status
-	status := &entities.HealthStatus{
-		Status:      entities.HealthStatusHealthy,
-		Latency:     time.Since(startTime),
-		Version:     "1.0.0", // TODO: Get actual version
-		Uptime:      24 * time.Hour, // TODO: Get actual uptime
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, endpoint, nil)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to create health check request: %w", err)
+	}
+
+	if token := strings.TrimSpace(g.config.PrivateKey); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		span.RecordError(err)
+		g.recordError(ctx, "health_check", err)
+		return nil, fmt.Errorf("health check request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	latency := time.Since(startTime)
+	status := entities.HealthStatusHealthy
+	var errors []string
+	if resp.StatusCode >= http.StatusBadRequest {
+		status = entities.HealthStatusDegraded
+		errors = append(errors, fmt.Sprintf("unexpected status code: %d", resp.StatusCode))
+	}
+
+	result := &entities.HealthStatus{
+		Status:  status,
+		Latency: latency,
+		Version: "",
+		Uptime:  0,
 		Metrics: map[string]interface{}{
-			"available_models": []string{g.config.ModelConfig.DefaultModel},
-			"provider_id":      g.config.ProviderID,
-			"active_requests":  0, // TODO: Get actual metrics
+			"provider_id": g.config.ProviderID,
+			"status_code": resp.StatusCode,
 		},
 		LastChecked: time.Now(),
-		Errors:      []string{},
+		Errors:      errors,
 	}
 
 	g.logger.Info("0G compute health check completed",
-		zap.String("status", status.Status),
-		zap.Duration("latency", status.Latency),
+		zap.String("status", result.Status),
+		zap.Duration("latency", result.Latency),
 	)
 
-	return status, nil
+	return result, nil
 }
 
 // GetServiceInfo returns information about available inference services
@@ -296,49 +326,13 @@ func (g *InferenceGateway) GetServiceInfo(ctx context.Context) (*entities.Servic
 	ctx, span := g.tracer.Start(ctx, "inference.get_service_info")
 	defer span.End()
 
-	// TODO: Implement actual service discovery
-	// For now, return mock service info
-	serviceInfo := &entities.ServiceInfo{
-		ProviderID:  g.config.ProviderID,
-		ServiceName: "0G AI-CFO Service",
-		Models: []entities.ModelInfo{
-			{
-				ModelID:     g.config.ModelConfig.DefaultModel,
-				Name:        "GPT-4 Compatible Model",
-				Description: "Large language model optimized for financial analysis",
-				MaxTokens:   g.config.ModelConfig.MaxTokens,
-				Version:     "1.0.0",
-				UpdatedAt:   time.Now(),
-			},
-		},
-		Pricing: &entities.PricingInfo{
-			Currency:      "USD",
-			BaseRate:      0.01,
-			TokenRate:     0.002,
-			MinimumCharge: 0.001,
-		},
-		Capabilities: []string{
-			"weekly_summaries",
-			"portfolio_analysis",
-			"risk_assessment",
-			"performance_evaluation",
-		},
-		Status: entities.HealthStatusHealthy,
-		Metadata: map[string]interface{}{
-			"endpoint":       g.config.BrokerEndpoint,
-			"max_tokens":     g.config.ModelConfig.MaxTokens,
-			"temperature":    g.config.ModelConfig.Temperature,
-			"auto_topup":     g.config.Funding.AutoTopup,
-		},
-	}
-
-	return serviceInfo, nil
+	return nil, fmt.Errorf("service discovery not implemented for broker endpoint %s", strings.TrimSpace(g.config.BrokerEndpoint))
 }
 
 // makeInferenceRequest makes a request to the 0G compute network
 func (g *InferenceGateway) makeInferenceRequest(ctx context.Context, operation string, prompt string, userID string) (*entities.InferenceResult, error) {
 	requestID := uuid.New().String()
-	
+
 	// Build OpenAI-compatible request
 	apiRequest := &OpenAICompatibleRequest{
 		Model: g.config.ModelConfig.DefaultModel,
@@ -361,12 +355,95 @@ func (g *InferenceGateway) makeInferenceRequest(ctx context.Context, operation s
 		User:             userID,
 	}
 
-	// TODO: Implement actual 0G compute network request
-	// For now, simulate the request and return mock response
-	result := g.simulateInferenceResponse(requestID, apiRequest, operation)
-	
-	// Record token usage metrics
-	g.metrics.TokensUsed.Add(ctx, int64(result.TokensUsed))
+	endpoint := strings.TrimSpace(g.config.BrokerEndpoint)
+	if endpoint == "" {
+		return nil, fmt.Errorf("broker endpoint not configured")
+	}
+
+	payload, err := json.Marshal(apiRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal inference request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create inference request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token := strings.TrimSpace(g.config.PrivateKey); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	start := time.Now()
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		g.recordError(ctx, operation, err)
+		return nil, fmt.Errorf("inference request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		g.recordError(ctx, operation, err)
+		return nil, fmt.Errorf("failed to read inference response: %w", err)
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		err := fmt.Errorf("inference service returned status %d: %s", resp.StatusCode, string(respBody))
+		g.recordError(ctx, operation, err)
+		return nil, err
+	}
+
+	var apiResponse OpenAICompatibleResponse
+	if err := json.Unmarshal(respBody, &apiResponse); err != nil {
+		g.recordError(ctx, operation, err)
+		return nil, fmt.Errorf("failed to parse inference response: %w", err)
+	}
+
+	if len(apiResponse.Choices) == 0 || apiResponse.Choices[0].Message == nil {
+		err := fmt.Errorf("inference response missing content")
+		g.recordError(ctx, operation, err)
+		return nil, err
+	}
+
+	content := apiResponse.Choices[0].Message.Content
+	if strings.TrimSpace(content) == "" {
+		content = "No content returned from inference provider."
+	}
+
+	processingTime := time.Since(start)
+	createdAt := time.Now()
+	if apiResponse.Created > 0 {
+		createdAt = time.Unix(apiResponse.Created, 0)
+	}
+
+	tokensUsed := 0
+	tokensGenerated := 0
+	if apiResponse.Usage != nil {
+		tokensUsed = apiResponse.Usage.TotalTokens
+		tokensGenerated = apiResponse.Usage.CompletionTokens
+	}
+
+	result := &entities.InferenceResult{
+		RequestID:   requestID,
+		Content:     content,
+		ContentType: "text/markdown",
+		Metadata: map[string]interface{}{
+			"operation":     operation,
+			"model":         apiResponse.Model,
+			"provider":      g.config.ProviderID,
+			"response_id":   apiResponse.ID,
+			"finish_reason": apiResponse.Choices[0].FinishReason,
+		},
+		TokensUsed:     tokensUsed,
+		ProcessingTime: processingTime,
+		Model:          apiResponse.Model,
+		CreatedAt:      createdAt,
+		ArtifactURI:    "",
+	}
+
+	g.metrics.TokensUsed.Add(ctx, int64(tokensUsed))
+	g.metrics.TokensGenerated.Add(ctx, int64(tokensGenerated))
 	g.metrics.ModelUsage.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("model", result.Model),
 		attribute.String("operation", operation),
@@ -375,54 +452,24 @@ func (g *InferenceGateway) makeInferenceRequest(ctx context.Context, operation s
 	return result, nil
 }
 
-// simulateInferenceResponse creates a mock inference response for development
-func (g *InferenceGateway) simulateInferenceResponse(requestID string, request *OpenAICompatibleRequest, operation string) *entities.InferenceResult {
-	// Generate mock response based on operation type
-	var content string
-	switch operation {
-	case "weekly_summary":
-		content = g.generateMockWeeklySummary()
-	case "on_demand_analysis":
-		content = g.generateMockAnalysis()
-	default:
-		content = "Analysis completed successfully."
-	}
-
-	return &entities.InferenceResult{
-		RequestID:      requestID,
-		Content:        content,
-		ContentType:    "text/markdown",
-		Metadata: map[string]interface{}{
-			"model_version": "1.0.0",
-			"provider":      "0G Network",
-			"operation":     operation,
-		},
-		TokensUsed:     250, // Mock value
-		ProcessingTime: 2 * time.Second, // Mock value
-		Model:          request.Model,
-		CreatedAt:      time.Now(),
-		ArtifactURI:    "", // Will be set by storeArtifact
-	}
-}
-
 // buildWeeklySummaryPrompt constructs the prompt for weekly summary generation
 func (g *InferenceGateway) buildWeeklySummaryPrompt(request *entities.WeeklySummaryRequest) (string, error) {
 	var promptBuilder strings.Builder
-	
+
 	promptBuilder.WriteString("# Weekly Portfolio Summary Request\n\n")
-	promptBuilder.WriteString(fmt.Sprintf("**Week Period**: %s to %s\n\n", 
-		request.WeekStart.Format("January 2, 2006"), 
+	promptBuilder.WriteString(fmt.Sprintf("**Week Period**: %s to %s\n\n",
+		request.WeekStart.Format("January 2, 2006"),
 		request.WeekEnd.Format("January 2, 2006")))
-	
+
 	// Portfolio performance data
 	if request.PortfolioData != nil {
 		promptBuilder.WriteString("## Portfolio Performance\n")
 		promptBuilder.WriteString(fmt.Sprintf("- **Total Value**: $%.2f\n", request.PortfolioData.TotalValue))
-		promptBuilder.WriteString(fmt.Sprintf("- **Week Change**: $%.2f (%.2f%%)\n", 
+		promptBuilder.WriteString(fmt.Sprintf("- **Week Change**: $%.2f (%.2f%%)\n",
 			request.PortfolioData.WeekChange, request.PortfolioData.WeekChangePct))
-		promptBuilder.WriteString(fmt.Sprintf("- **Total Return**: $%.2f (%.2f%%)\n", 
+		promptBuilder.WriteString(fmt.Sprintf("- **Total Return**: $%.2f (%.2f%%)\n",
 			request.PortfolioData.TotalReturn, request.PortfolioData.TotalReturnPct))
-		
+
 		// Position details
 		if len(request.PortfolioData.Positions) > 0 {
 			promptBuilder.WriteString("\n### Position Performance\n")
@@ -431,7 +478,7 @@ func (g *InferenceGateway) buildWeeklySummaryPrompt(request *entities.WeeklySumm
 					pos.BasketName, pos.CurrentValue, pos.Weight*100, pos.UnrealizedPL, pos.UnrealizedPLPct))
 			}
 		}
-		
+
 		// Risk metrics
 		if request.PortfolioData.RiskMetrics != nil {
 			promptBuilder.WriteString("\n### Risk Analysis\n")
@@ -440,7 +487,7 @@ func (g *InferenceGateway) buildWeeklySummaryPrompt(request *entities.WeeklySumm
 			promptBuilder.WriteString(fmt.Sprintf("- **Diversification Score**: %.2f/1.0\n", request.PortfolioData.RiskMetrics.Diversification))
 		}
 	}
-	
+
 	// User preferences
 	if request.Preferences != nil {
 		promptBuilder.WriteString(fmt.Sprintf("\n## User Preferences\n"))
@@ -450,7 +497,7 @@ func (g *InferenceGateway) buildWeeklySummaryPrompt(request *entities.WeeklySumm
 			promptBuilder.WriteString(fmt.Sprintf("- **Focus Areas**: %s\n", strings.Join(request.Preferences.FocusAreas, ", ")))
 		}
 	}
-	
+
 	promptBuilder.WriteString("\n---\n\n")
 	promptBuilder.WriteString("Please provide a comprehensive weekly portfolio summary in markdown format that includes:\n\n")
 	promptBuilder.WriteString("1. **Executive Summary** - Key highlights and overall performance\n")
@@ -460,23 +507,23 @@ func (g *InferenceGateway) buildWeeklySummaryPrompt(request *entities.WeeklySumm
 	promptBuilder.WriteString("5. **Key Observations** - Notable trends or changes in the portfolio\n")
 	promptBuilder.WriteString("6. **Looking Ahead** - Considerations for the upcoming week\n\n")
 	promptBuilder.WriteString("**Important**: Focus on educational insights and avoid specific trading recommendations. Include appropriate disclaimers about investment risks.\n")
-	
+
 	return promptBuilder.String(), nil
 }
 
 // buildAnalysisPrompt constructs the prompt for on-demand analysis
 func (g *InferenceGateway) buildAnalysisPrompt(request *entities.AnalysisRequest) (string, error) {
 	var promptBuilder strings.Builder
-	
+
 	promptBuilder.WriteString(fmt.Sprintf("# On-Demand Portfolio Analysis: %s\n\n", strings.Title(request.AnalysisType)))
-	
+
 	// Portfolio data
 	if request.PortfolioData != nil {
 		promptBuilder.WriteString("## Current Portfolio\n")
 		promptBuilder.WriteString(fmt.Sprintf("- **Total Value**: $%.2f\n", request.PortfolioData.TotalValue))
-		promptBuilder.WriteString(fmt.Sprintf("- **Total Return**: $%.2f (%.2f%%)\n", 
+		promptBuilder.WriteString(fmt.Sprintf("- **Total Return**: $%.2f (%.2f%%)\n",
 			request.PortfolioData.TotalReturn, request.PortfolioData.TotalReturnPct))
-		
+
 		if len(request.PortfolioData.Positions) > 0 {
 			promptBuilder.WriteString("\n### Current Positions\n")
 			for _, pos := range request.PortfolioData.Positions {
@@ -485,7 +532,7 @@ func (g *InferenceGateway) buildAnalysisPrompt(request *entities.AnalysisRequest
 			}
 		}
 	}
-	
+
 	// Analysis-specific instructions
 	promptBuilder.WriteString("\n---\n\n")
 	switch request.AnalysisType {
@@ -504,9 +551,9 @@ func (g *InferenceGateway) buildAnalysisPrompt(request *entities.AnalysisRequest
 	default:
 		promptBuilder.WriteString("Please provide a comprehensive analysis of the requested aspect of the portfolio.\n")
 	}
-	
+
 	promptBuilder.WriteString("\n**Important**: Provide actionable insights while avoiding specific trading recommendations. Include appropriate investment disclaimers.\n")
-	
+
 	return promptBuilder.String(), nil
 }
 
@@ -538,11 +585,11 @@ func (g *InferenceGateway) storeArtifact(ctx context.Context, result *entities.I
 
 	// Store in 0G storage
 	metadata := map[string]string{
-		"content_type":   "application/json",
-		"user_id":        userID,
-		"analysis_type":  analysisType,
-		"request_id":     result.RequestID,
-		"created_at":     result.CreatedAt.UTC().Format(time.RFC3339),
+		"content_type":  "application/json",
+		"user_id":       userID,
+		"analysis_type": analysisType,
+		"request_id":    result.RequestID,
+		"created_at":    result.CreatedAt.UTC().Format(time.RFC3339),
 	}
 
 	storageResult, err := g.storageClient.Store(ctx, entities.NamespaceAIArtifacts, jsonData, metadata)
@@ -560,74 +607,6 @@ func (g *InferenceGateway) storeArtifact(ctx context.Context, result *entities.I
 	)
 
 	return nil
-}
-
-// generateMockWeeklySummary generates a mock weekly summary for development
-func (g *InferenceGateway) generateMockWeeklySummary() string {
-	return `# Weekly Portfolio Summary
-
-## Executive Summary
-Your portfolio showed solid performance this week with a **+2.4%** gain, outperforming the broader market. Strong technology positions drove most of the positive returns.
-
-## Performance Analysis
-- **Total Return**: +$1,240 (+2.4%)
-- **Best Performer**: Tech Growth basket (+4.1%)
-- **Underperformer**: Conservative Income (-0.3%)
-
-### Key Contributors
-- Technology sector strength boosted returns
-- Growth positions benefited from market optimism
-- Defensive positions provided stability during volatility
-
-## Risk Assessment
-Your portfolio maintains a **moderate risk profile** with good diversification:
-- Volatility: 12.3% (within target range)
-- Max Drawdown: -3.2% (acceptable)
-- Diversification Score: 0.78/1.0 (well diversified)
-
-## Market Context
-- Technology rally continued on AI enthusiasm
-- Interest rate concerns remained subdued
-- Economic data showed resilient growth
-
-## Key Observations
-- Your risk-adjusted returns remain strong
-- Technology allocation is paying off
-- Conservative positions provided good downside protection
-
-## Looking Ahead
-- Monitor technology valuations for sustainability
-- Consider rebalancing if tech allocation exceeds targets
-- Economic data releases may create volatility
-
----
-*This analysis is for informational purposes only and should not be considered as investment advice. All investments carry risk of loss.*`
-}
-
-// generateMockAnalysis generates a mock on-demand analysis for development
-func (g *InferenceGateway) generateMockAnalysis() string {
-	return `# Portfolio Analysis
-
-## Current Assessment
-Your portfolio demonstrates solid fundamentals with room for optimization in several key areas.
-
-## Key Findings
-- **Diversification**: Good spread across asset classes with minor concentration in growth stocks
-- **Risk Level**: Moderate risk profile aligned with stated risk tolerance
-- **Performance**: Above-average returns with reasonable volatility
-
-## Recommendations
-1. **Rebalancing Opportunity**: Consider reducing technology exposure by 2-3%
-2. **Risk Management**: Current drawdown protection appears adequate
-3. **Cost Efficiency**: Review expense ratios on underperforming positions
-
-## Next Steps
-- Monitor quarterly rebalancing triggers
-- Review risk metrics monthly
-- Consider tax-loss harvesting opportunities
-
----
-*This analysis is for educational purposes only. Please consult with a financial advisor for personalized investment advice.*`
 }
 
 // recordError records error metrics
@@ -677,7 +656,7 @@ func initInferenceMetrics(meter metric.Meter) (*InferenceMetrics, error) {
 		return nil, err
 	}
 
-activeRequests, err := meter.Int64UpDownCounter("zerog_inference_active_requests",
+	activeRequests, err := meter.Int64UpDownCounter("zerog_inference_active_requests",
 		metric.WithDescription("Number of active inference requests"))
 	if err != nil {
 		return nil, err

@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package integration
 
 import (
@@ -10,11 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stack-service/stack_service/internal/domain/entities"
+	"github.com/stack-service/stack_service/internal/domain/services"
 	"github.com/stack-service/stack_service/internal/infrastructure/cache"
 	"github.com/stack-service/stack_service/internal/infrastructure/config"
 	"github.com/stack-service/stack_service/internal/infrastructure/database"
@@ -22,6 +27,36 @@ import (
 	"github.com/stack-service/stack_service/internal/infrastructure/repositories"
 	"github.com/stack-service/stack_service/pkg/logger"
 )
+
+type stubVerificationEmailSender struct {
+	messages []struct {
+		Email string
+		Code  string
+	}
+}
+
+func (s *stubVerificationEmailSender) SendVerificationEmail(_ context.Context, email, code string) error {
+	s.messages = append(s.messages, struct {
+		Email string
+		Code  string
+	}{Email: email, Code: code})
+	return nil
+}
+
+type stubVerificationSMSSender struct {
+	messages []struct {
+		Phone string
+		Code  string
+	}
+}
+
+func (s *stubVerificationSMSSender) SendVerificationSMS(_ context.Context, phone, code string) error {
+	s.messages = append(s.messages, struct {
+		Phone string
+		Code  string
+	}{Phone: phone, Code: code})
+	return nil
+}
 
 // TestSignUpFlow tests the complete signup flow with verification
 func TestSignUpFlow(t *testing.T) {
@@ -42,11 +77,11 @@ func TestSignUpFlow(t *testing.T) {
 			RefreshTTL: 2592000,
 		},
 		Email: config.EmailConfig{
-			Provider:    "mock",
+			Provider:    "",
 			Environment: "test",
 		},
 		SMS: config.SMSConfig{
-			Provider:    "mock",
+			Provider:    "",
 			Environment: "test",
 		},
 		Verification: config.VerificationConfig{
@@ -74,6 +109,17 @@ func TestSignUpFlow(t *testing.T) {
 	// Initialize DI container
 	container, err := di.NewContainer(cfg, db, log)
 	require.NoError(t, err)
+
+	// Override verification service with stubbed senders to avoid external dependencies
+	emailStub := &stubVerificationEmailSender{}
+	smsStub := &stubVerificationSMSSender{}
+	container.VerificationService = services.NewVerificationService(
+		container.RedisClient,
+		emailStub,
+		smsStub,
+		container.ZapLog,
+		container.Config,
+	)
 
 	// Setup test router
 	router := setupTestRouter(container)
@@ -120,7 +166,7 @@ func testEmailSignupFlow(t *testing.T, router *gin.Engine, redisClient cache.Red
 	// Step 2: Verify code (get the actual code from Redis)
 	ctx := context.Background()
 	key := fmt.Sprintf("verify:email:%s", "test@example.com")
-	
+
 	var codeData entities.VerificationCodeData
 	err = redisClient.GetJSON(ctx, key, &codeData)
 	require.NoError(t, err)
@@ -171,7 +217,7 @@ func testPhoneSignupFlow(t *testing.T, router *gin.Engine, redisClient cache.Red
 	// Step 2: Verify code
 	ctx := context.Background()
 	key := fmt.Sprintf("verify:phone:%s", "+1234567890")
-	
+
 	var codeData entities.VerificationCodeData
 	err = redisClient.GetJSON(ctx, key, &codeData)
 	require.NoError(t, err)
@@ -268,7 +314,7 @@ func setupTestRouter(container *di.Container) *gin.Engine {
 	// This would be similar to the main router setup
 	// For now, return a basic router with the auth endpoints
 	router := gin.New()
-	
+
 	// Add auth routes
 	auth := router.Group("/api/v1/auth")
 	{

@@ -165,8 +165,19 @@ func (u *UserProfile) Validate() error {
 
 // CanStartKYC checks if user can start KYC process
 func (u *UserProfile) CanStartKYC() bool {
-	return u.EmailVerified &&
-		(u.OnboardingStatus == OnboardingStatusStarted || u.OnboardingStatus == OnboardingStatusKYCRejected)
+	if !u.EmailVerified {
+		return false
+	}
+
+	switch u.OnboardingStatus {
+	case OnboardingStatusStarted, OnboardingStatusKYCRejected:
+		return true
+	case OnboardingStatusKYCPending:
+		// Allow initial submission when we're in the pending state but nothing was sent yet
+		return u.KYCSubmittedAt == nil
+	default:
+		return false
+	}
 }
 
 // CanCreateWallets checks if user can proceed to wallet creation

@@ -26,10 +26,10 @@ import (
 
 // StorageClient implements the ZeroGStorageClient interface
 type StorageClient struct {
-	config        *config.ZeroGStorageConfig
-	logger        *zap.Logger
-	tracer        trace.Tracer
-	metrics       *StorageMetrics
+	config  *config.ZeroGStorageConfig
+	logger  *zap.Logger
+	tracer  trace.Tracer
+	metrics *StorageMetrics
 	// 0G client components
 	web3Client    *web3go.Client
 	indexerClient *indexer.Client
@@ -37,12 +37,12 @@ type StorageClient struct {
 
 // StorageMetrics contains observability metrics for storage operations
 type StorageMetrics struct {
-	RequestsTotal    metric.Int64Counter
-	RequestDuration  metric.Float64Histogram
-	RequestErrors    metric.Int64Counter
-	StoredBytes      metric.Int64Counter
-	RetrievedBytes   metric.Int64Counter
-	ActiveReplicas   metric.Int64Gauge
+	RequestsTotal   metric.Int64Counter
+	RequestDuration metric.Float64Histogram
+	RequestErrors   metric.Int64Counter
+	StoredBytes     metric.Int64Counter
+	RetrievedBytes  metric.Int64Counter
+	ActiveReplicas  metric.Int64Gauge
 }
 
 // NewStorageClient creates a new 0G storage client
@@ -256,28 +256,49 @@ func (c *StorageClient) HealthCheck(ctx context.Context) (*entities.HealthStatus
 
 	c.logger.Debug("Performing 0G storage health check")
 
-	// TODO: Implement actual health check
-	// For now, return a mock healthy status
-	status := &entities.HealthStatus{
-		Status:      entities.HealthStatusHealthy,
-		Latency:     time.Since(startTime),
-		Version:     "1.0.0", // TODO: Get actual version
-		Uptime:      24 * time.Hour, // TODO: Get actual uptime
+	nodes, err := c.indexerClient.SelectNodes(ctx, 1, 1, []string{}, "min")
+	if err != nil {
+		span.RecordError(err)
+		c.recordError(ctx, "health_check", err)
+		return &entities.HealthStatus{
+			Status:  entities.HealthStatusDegraded,
+			Latency: time.Since(startTime),
+			Version: "",
+			Uptime:  0,
+			Metrics: map[string]interface{}{
+				"replicas_expected": c.config.ExpectedReplicas,
+			},
+			LastChecked: time.Now(),
+			Errors:      []string{err.Error()},
+		}, nil
+	}
+
+	status := entities.HealthStatusHealthy
+	var errors []string
+	if len(nodes) == 0 {
+		status = entities.HealthStatusDegraded
+		errors = append(errors, "no storage nodes available")
+	}
+
+	result := &entities.HealthStatus{
+		Status:  status,
+		Latency: time.Since(startTime),
+		Version: "",
+		Uptime:  0,
 		Metrics: map[string]interface{}{
-			"active_connections": 1, // TODO: Get actual metrics
-			"storage_nodes":      3,
-			"replicas_available": c.config.ExpectedReplicas,
+			"available_nodes":   len(nodes),
+			"expected_replicas": c.config.ExpectedReplicas,
 		},
 		LastChecked: time.Now(),
-		Errors:      []string{},
+		Errors:      errors,
 	}
 
 	c.logger.Info("0G storage health check completed",
-		zap.String("status", status.Status),
-		zap.Duration("latency", status.Latency),
+		zap.String("status", result.Status),
+		zap.Duration("latency", result.Latency),
 	)
 
-	return status, nil
+	return result, nil
 }
 
 // ListObjects lists objects in a namespace
@@ -288,14 +309,7 @@ func (c *StorageClient) ListObjects(ctx context.Context, namespace string, prefi
 	))
 	defer span.End()
 
-	// TODO: Implement actual object listing
-	// For now, return empty list
-	c.logger.Debug("Listing objects in 0G storage",
-		zap.String("namespace", namespace),
-		zap.String("prefix", prefix),
-	)
-
-	return []entities.StorageObject{}, nil
+	return nil, fmt.Errorf("list objects not implemented for namespace %s", namespace)
 }
 
 // Delete removes an object from storage
@@ -305,17 +319,7 @@ func (c *StorageClient) Delete(ctx context.Context, uri string) error {
 	))
 	defer span.End()
 
-	// TODO: Implement actual object deletion
-	c.logger.Debug("Deleting object from 0G storage",
-		zap.String("uri", uri),
-	)
-
-	// For now, just log the operation
-	c.logger.Info("Object deletion requested",
-		zap.String("uri", uri),
-	)
-
-	return nil
+	return fmt.Errorf("delete operation not implemented for uri %s", uri)
 }
 
 // storeWithRetries performs storage operation with exponential backoff retry
@@ -331,7 +335,7 @@ func (c *StorageClient) storeWithRetries(ctx context.Context, namespace string, 
 				zap.Int("attempt", attempt),
 				zap.Duration("backoff", backoff),
 			)
-			
+
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -372,7 +376,7 @@ func (c *StorageClient) retrieveWithRetries(ctx context.Context, uri string) (*e
 				zap.Int("attempt", attempt),
 				zap.Duration("backoff", backoff),
 			)
-			
+
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -490,7 +494,7 @@ func (c *StorageClient) performStore(ctx context.Context, namespace string, data
 
 	// Build URI using the actual file hash returned from upload
 	uri := fmt.Sprintf("0g://%s/%s", namespace, fileHash.String())
-	
+
 	// Add transaction hash and other metadata
 	if metadata == nil {
 		metadata = make(map[string]string)
@@ -590,7 +594,7 @@ func (c *StorageClient) performRetrieve(ctx context.Context, uri string) (*entit
 		"merkle_root": merkleRootStr,
 		"verified":    "true", // Since we used proof verification
 	}
-	
+
 	return &entities.StorageData{
 		Data:     data,
 		URI:      uri,
@@ -690,7 +694,7 @@ func (c *StorageClient) extractHashFromURI(uri string) (string, error) {
 
 	// Remove the 0g:// prefix
 	path := strings.TrimPrefix(uri, "0g://")
-	
+
 	// Split by / to get namespace and hash
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) != 2 {
@@ -703,7 +707,7 @@ func (c *StorageClient) extractHashFromURI(uri string) (string, error) {
 // Close closes the storage client and cleans up resources
 func (c *StorageClient) Close() error {
 	c.logger.Info("Closing 0G storage client")
-	
+
 	// Close Web3 client connection
 	if c.web3Client != nil {
 		c.web3Client.Close()

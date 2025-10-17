@@ -343,7 +343,7 @@ Troubleshooting
 - Check DI container wiring for handlers and services.
 - Validate database migrations are applied (users, onboarding_flows, kyc_submissions, wallets).
 - Inspect logs for `request_id` on failures; verify payload structure.
-- For local tests, use mock middleware (`MockAuthMiddleware`) when enabled in dev config.
+- Ensure requests to protected onboarding endpoints include a valid JWT obtained from the authentication flow.
 
 References
 - `internal/api/routes/routes.go` — route definitions.

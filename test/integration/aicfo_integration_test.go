@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package integration
 
 import (
@@ -11,7 +14,6 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stack-service/stack_service/internal/domain/entities"
 	"github.com/stack-service/stack_service/internal/domain/services"
-	"github.com/stack-service/stack_service/internal/infrastructure/adapters"
 	"github.com/stack-service/stack_service/internal/infrastructure/config"
 	"github.com/stack-service/stack_service/internal/infrastructure/zerog"
 	"github.com/stack-service/stack_service/internal/zerog/prompts"
@@ -20,6 +22,27 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
+
+type fakeEmailMessage struct {
+	To      string
+	Subject string
+	HTML    string
+	Text    string
+}
+
+type fakeEmailService struct {
+	messages []fakeEmailMessage
+}
+
+func (f *fakeEmailService) SendCustomEmail(_ context.Context, to, subject, htmlContent, textContent string) error {
+	f.messages = append(f.messages, fakeEmailMessage{
+		To:      to,
+		Subject: subject,
+		HTML:    htmlContent,
+		Text:    textContent,
+	})
+	return nil
+}
 
 // TestAICFOIntegration tests the complete AI-CFO functionality end-to-end
 func TestAICFOIntegration(t *testing.T) {
@@ -65,15 +88,7 @@ func testWeeklySummaryFlow(t *testing.T, ctx context.Context, logger *zap.Logger
 	}
 	mockNamespaceManager := zerog.NewNamespaceManager(mockStorageClient, namespaces, logger)
 
-	// Create a real EmailService instance for testing (it will be in mock mode)
-	emailConfig := adapters.EmailServiceConfig{
-		APIKey:      "",
-		FromEmail:   "test@example.com",
-		FromName:    "Test Service",
-		Environment: "development",
-		BaseURL:     "http://localhost:3000",
-	}
-	mockEmailService := adapters.NewEmailService(logger, emailConfig)
+	mockEmailService := &fakeEmailService{}
 
 	// Create notification service
 	notificationService, err := services.NewNotificationService(mockEmailService, logger)
@@ -129,15 +144,7 @@ func testOnDemandAnalysisFlow(t *testing.T, ctx context.Context, logger *zap.Log
 	}
 	mockNamespaceManager := zerog.NewNamespaceManager(mockStorageClient, namespaces, logger)
 
-	// Create a real EmailService instance for testing (it will be in mock mode)
-	emailConfig := adapters.EmailServiceConfig{
-		APIKey:      "",
-		FromEmail:   "test@example.com",
-		FromName:    "Test Service",
-		Environment: "development",
-		BaseURL:     "http://localhost:3000",
-	}
-	mockEmailService := adapters.NewEmailService(logger, emailConfig)
+	mockEmailService := &fakeEmailService{}
 
 	// Create notification service
 	notificationService, err := services.NewNotificationService(mockEmailService, logger)

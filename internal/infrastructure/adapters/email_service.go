@@ -1,10 +1,14 @@
 package adapters
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	// "net/http"
-	// "os"
+	"html"
+	"io"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sendgrid/sendgrid-go"
@@ -14,61 +18,113 @@ import (
 	"github.com/stack-service/stack_service/internal/domain/entities"
 )
 
+const (
+	resendAPIBaseURL        = "https://api.resend.com"
+	resendSandboxFromSender = "onboarding@resend.dev"
+)
+
+// LoginAlertDetails represents metadata associated with a login notification email
+type LoginAlertDetails struct {
+	IP           string
+	ForwardedFor string
+	Location     string
+	UserAgent    string
+	LoginAt      time.Time
+}
+
 // EmailServiceConfig holds email service configuration
 type EmailServiceConfig struct {
+	Provider    string
 	APIKey      string
 	FromEmail   string
 	FromName    string
 	Environment string // "development", "staging", "production"
 	BaseURL     string // For verification links
+	ReplyTo     string
 }
 
 // EmailService implements the email service interface
 type EmailService struct {
-	logger   *zap.Logger
-	config   EmailServiceConfig
-	client   *sendgrid.Client
-	mockMode bool // Set to true in development/testing
+	logger     *zap.Logger
+	config     EmailServiceConfig
+	client     *sendgrid.Client
+	httpClient *http.Client
 }
 
 // NewEmailService creates a new email service
-func NewEmailService(logger *zap.Logger, config EmailServiceConfig) *EmailService {
-	mockMode := config.Environment == "development" || config.APIKey == ""
+func NewEmailService(logger *zap.Logger, config EmailServiceConfig) (*EmailService, error) {
+	provider := strings.ToLower(strings.TrimSpace(config.Provider))
+	if provider == "" {
+		return nil, fmt.Errorf("email provider is required")
+	}
 
-	var client *sendgrid.Client
-	if !mockMode {
+	if strings.TrimSpace(config.FromEmail) == "" {
+		return nil, fmt.Errorf("email from address is required")
+	}
+
+	var (
+		client     *sendgrid.Client
+		httpClient *http.Client
+	)
+
+	switch provider {
+	case "sendgrid":
+		if strings.TrimSpace(config.APIKey) == "" {
+			return nil, fmt.Errorf("sendgrid api key is required")
+		}
 		client = sendgrid.NewSendClient(config.APIKey)
+	case "resend":
+		if strings.TrimSpace(config.APIKey) == "" {
+			return nil, fmt.Errorf("resend api key is required")
+		}
+		httpClient = &http.Client{Timeout: 30 * time.Second}
+	default:
+		return nil, fmt.Errorf("unsupported email provider: %s", provider)
 	}
 
 	return &EmailService{
-		logger:   logger,
-		config:   config,
-		client:   client,
-		mockMode: mockMode,
+		logger:     logger,
+		config:     config,
+		client:     client,
+		httpClient: httpClient,
+	}, nil
+}
+
+// sendEmail is a helper method to send emails via the configured provider
+func (e *EmailService) sendEmail(ctx context.Context, to, subject, htmlContent, textContent string) error {
+	provider := strings.ToLower(e.config.Provider)
+
+	// Add timeout to context
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	switch provider {
+	case "resend":
+		return e.sendViaResend(ctxWithTimeout, to, subject, htmlContent, textContent)
+	case "sendgrid":
+		return e.sendViaSendgrid(ctxWithTimeout, to, subject, htmlContent, textContent)
+	default:
+		return fmt.Errorf("unsupported email provider: %s", provider)
 	}
 }
 
-// sendEmail is a helper method to send emails via SendGrid or mock
-func (e *EmailService) sendEmail(ctx context.Context, to, subject, htmlContent, textContent string) error {
-	if e.mockMode {
-		e.logger.Info("Email sent successfully (MOCK)",
-			zap.String("to", to),
-			zap.String("subject", subject),
-			zap.String("content_preview", textContent[:min(100, len(textContent))]+"..."))
-		return nil
+func (e *EmailService) sendViaSendgrid(ctx context.Context, to, subject, htmlContent, textContent string) error {
+	if e.client == nil {
+		return fmt.Errorf("sendgrid client not configured")
 	}
 
 	from := mail.NewEmail(e.config.FromName, e.config.FromEmail)
 	toEmail := mail.NewEmail("", to)
 	message := mail.NewSingleEmail(from, subject, toEmail, textContent, htmlContent)
 
-	// Add timeout to context
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	if strings.TrimSpace(e.config.ReplyTo) != "" {
+		message.SetReplyTo(mail.NewEmail(e.config.FromName, e.config.ReplyTo))
+	}
 
-	response, err := e.client.SendWithContext(ctxWithTimeout, message)
+	response, err := e.client.SendWithContext(ctx, message)
 	if err != nil {
 		e.logger.Error("Failed to send email",
+			zap.String("provider", "sendgrid"),
 			zap.String("to", to),
 			zap.String("subject", subject),
 			zap.Error(err))
@@ -77,6 +133,7 @@ func (e *EmailService) sendEmail(ctx context.Context, to, subject, htmlContent, 
 
 	if response.StatusCode >= 400 {
 		e.logger.Error("Email service returned error",
+			zap.String("provider", "sendgrid"),
 			zap.String("to", to),
 			zap.String("subject", subject),
 			zap.Int("status_code", response.StatusCode),
@@ -85,6 +142,7 @@ func (e *EmailService) sendEmail(ctx context.Context, to, subject, htmlContent, 
 	}
 
 	e.logger.Info("Email sent successfully",
+		zap.String("provider", "sendgrid"),
 		zap.String("to", to),
 		zap.String("subject", subject),
 		zap.Int("status_code", response.StatusCode))
@@ -92,12 +150,118 @@ func (e *EmailService) sendEmail(ctx context.Context, to, subject, htmlContent, 
 	return nil
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
+func (e *EmailService) sendViaResend(ctx context.Context, to, subject, htmlContent, textContent string) error {
+	if e.httpClient == nil {
+		return fmt.Errorf("resend client not configured")
 	}
-	return b
+
+	fromEmail := strings.TrimSpace(e.config.FromEmail)
+	if fromEmail == "" {
+		return fmt.Errorf("resend from email is required")
+	}
+
+	from := fromEmail
+	if strings.TrimSpace(e.config.FromName) != "" {
+		from = fmt.Sprintf("%s <%s>", e.config.FromName, fromEmail)
+	}
+
+	if isNonProductionEnv(e.config.Environment) {
+		domainParts := strings.SplitN(fromEmail, "@", 2)
+		if len(domainParts) != 2 || strings.TrimSpace(domainParts[1]) == "" {
+			return fmt.Errorf("invalid resend from address: %s", fromEmail)
+		}
+
+		domain := strings.ToLower(strings.TrimSpace(domainParts[1]))
+		if domain != "resend.dev" {
+			originalFrom := from
+			fromEmail = resendSandboxFromSender
+			if strings.TrimSpace(e.config.FromName) != "" {
+				from = fmt.Sprintf("%s <%s>", e.config.FromName, resendSandboxFromSender)
+			} else {
+				from = resendSandboxFromSender
+			}
+
+			e.logger.Warn("Overriding Resend sender address for non-production environment",
+				zap.String("original_from", originalFrom),
+				zap.String("overridden_from", from),
+				zap.String("environment", e.config.Environment))
+		}
+	}
+
+	payload := map[string]any{
+		"from":    from,
+		"to":      []string{to},
+		"subject": subject,
+		"html":    htmlContent,
+	}
+
+	if textContent != "" {
+		payload["text"] = textContent
+	}
+	if strings.TrimSpace(e.config.ReplyTo) != "" {
+		payload["reply_to"] = e.config.ReplyTo
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal resend payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, resendAPIBaseURL+"/emails", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create resend request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+e.config.APIKey)
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		e.logger.Error("Failed to send email via Resend",
+			zap.String("provider", "resend"),
+			zap.String("to", to),
+			zap.String("subject", subject),
+			zap.Error(err))
+		return fmt.Errorf("resend send request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode >= 400 {
+		logFields := []zap.Field{
+			zap.String("provider", "resend"),
+			zap.String("to", to),
+			zap.String("subject", subject),
+			zap.Int("status_code", resp.StatusCode),
+			zap.String("environment", e.config.Environment),
+			zap.String("response_body", string(respBody)),
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			e.logger.Error("Resend authentication failed", logFields...)
+		} else {
+			e.logger.Error("Resend returned error", logFields...)
+		}
+
+		return fmt.Errorf("resend email error: status %d", resp.StatusCode)
+	}
+
+	e.logger.Info("Email sent successfully",
+		zap.String("provider", "resend"),
+		zap.String("to", to),
+		zap.String("subject", subject),
+		zap.Int("status_code", resp.StatusCode))
+
+	return nil
+}
+
+func isNonProductionEnv(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "", "dev", "development", "local", "staging", "test", "testing":
+		return true
+	default:
+		return false
+	}
 }
 
 // SendVerificationEmail sends an email verification message
@@ -250,6 +414,80 @@ If you have any questions, feel free to contact our support team.
 Best regards,
 The Stack Service Team
 	`, e.config.BaseURL)
+
+	return e.sendEmail(ctx, email, subject, htmlContent, textContent)
+}
+
+// SendCustomEmail delivers an email composed outside of the predefined templates
+func (e *EmailService) SendCustomEmail(ctx context.Context, to, subject, htmlContent, textContent string) error {
+	return e.sendEmail(ctx, to, subject, htmlContent, textContent)
+}
+
+// SendLoginAlertEmail notifies the user about a successful login attempt
+func (e *EmailService) SendLoginAlertEmail(ctx context.Context, email string, details LoginAlertDetails) error {
+	if details.LoginAt.IsZero() {
+		details.LoginAt = time.Now().UTC()
+	}
+
+	location := strings.TrimSpace(details.Location)
+	if location == "" {
+		location = "Unknown"
+	}
+
+	forwarded := strings.TrimSpace(details.ForwardedFor)
+	if forwarded == "" {
+		forwarded = "N/A"
+	}
+
+	userAgent := strings.TrimSpace(details.UserAgent)
+	if userAgent == "" {
+		userAgent = "Unknown"
+	}
+
+	safeIP := html.EscapeString(strings.TrimSpace(details.IP))
+	safeForwarded := html.EscapeString(forwarded)
+	safeLocation := html.EscapeString(location)
+	safeUserAgent := html.EscapeString(userAgent)
+	loginTime := details.LoginAt.UTC().Format(time.RFC1123)
+
+	subject := "New Login Detected - Stack Service"
+
+	htmlContent := fmt.Sprintf(`
+		<!DOCTYPE html>
+		<html>
+		<head><title>New Login Detected</title></head>
+		<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+			<div style="background-color: #f8f9fa; padding: 24px; border-radius: 8px; border: 1px solid #e9ecef;">
+				<h2 style="color: #333; margin-bottom: 16px;">We noticed a new login to your account</h2>
+				<p style="color: #555; line-height: 1.6;">If this was you, you're all set. If not, secure your account right away.</p>
+				<div style="background-color: white; border-radius: 8px; padding: 16px; margin: 20px 0; border: 1px solid #dee2e6;">
+					<p style="margin: 4px 0; color: #333;"><strong>IP Address:</strong> %s</p>
+					<p style="margin: 4px 0; color: #333;"><strong>Forwarded For:</strong> %s</p>
+					<p style="margin: 4px 0; color: #333;"><strong>Location:</strong> %s</p>
+					<p style="margin: 4px 0; color: #333;"><strong>Device:</strong> %s</p>
+					<p style="margin: 4px 0; color: #333;"><strong>Time (UTC):</strong> %s</p>
+				</div>
+				<p style="color: #555; line-height: 1.6;">If you did not perform this login, please reset your password immediately and contact support.</p>
+			</div>
+		</body>
+		</html>
+	`, safeIP, safeForwarded, safeLocation, safeUserAgent, loginTime)
+
+	textContent := fmt.Sprintf(`
+New login detected on your Stack Service account.
+
+IP Address: %s
+Forwarded For: %s
+Location: %s
+Device: %s
+Time (UTC): %s
+
+If this wasn't you, please reset your password immediately and contact support.
+`, strings.TrimSpace(details.IP), forwarded, location, userAgent, loginTime)
+
+	e.logger.Info("Sending login alert email",
+		zap.String("email", email),
+		zap.String("ip", strings.TrimSpace(details.IP)))
 
 	return e.sendEmail(ctx, email, subject, htmlContent, textContent)
 }

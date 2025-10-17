@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/stack-service/stack_service/internal/infrastructure/adapters"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -14,9 +13,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// EmailSender defines the contract required for sending rich email content
+type EmailSender interface {
+	SendCustomEmail(ctx context.Context, to, subject, htmlContent, textContent string) error
+}
+
 // NotificationService handles sending notifications to users
 type NotificationService struct {
-	emailService *adapters.EmailService
+	emailService EmailSender
 	logger       *zap.Logger
 	tracer       trace.Tracer
 	metrics      *NotificationMetrics
@@ -42,7 +46,7 @@ type WeeklySummaryNotification struct {
 
 // NewNotificationService creates a new notification service
 func NewNotificationService(
-	emailService *adapters.EmailService,
+	emailService EmailSender,
 	logger *zap.Logger,
 ) (*NotificationService, error) {
 	tracer := otel.Tracer("notification-service")
@@ -242,28 +246,13 @@ This email was sent to you because you have enabled weekly portfolio summary not
 // sendWeeklySummaryEmail sends an email using the email service's private method
 // This is a workaround since the email service doesn't have a public SendEmail method with our desired interface
 func (n *NotificationService) sendWeeklySummaryEmail(ctx context.Context, to, subject, htmlContent, textContent string) error {
-	// Use reflection or create a wrapper method
-	// For now, we'll directly call the private method through a wrapper
-	// In a real implementation, we'd either modify the EmailService to have the right interface
-	// or create a proper adapter
-	
-	// Since we can't access the private method directly, we'll create a simple wrapper
-	// that creates a temporary SendGrid-like email and sends it
-	
-	// For the mock implementation, we'll just log the email
-	n.logger.Info("Sending weekly summary email",
-		zap.String("to", to),
-		zap.String("subject", subject),
-		zap.Int("html_length", len(htmlContent)),
-		zap.Int("text_length", len(textContent)),
-	)
-	
-	// In a real implementation, you would:
-	// 1. Create a public method on EmailService that accepts our EmailRequest struct
-	// 2. Or use the existing methods like SendWelcomeEmail as a pattern
-	// 3. Or create an adapter that bridges the interface gap
-	
-	// For now, return success since this is a mock implementation
+	if n.emailService == nil {
+		return fmt.Errorf("email service not configured")
+	}
+
+	if err := n.emailService.SendCustomEmail(ctx, to, subject, htmlContent, textContent); err != nil {
+		return fmt.Errorf("failed to dispatch weekly summary email: %w", err)
+	}
 	return nil
 }
 

@@ -277,7 +277,7 @@
         { "name": "Blockchain", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"txid\": \"0xabc123\",\n  \"confirmations\": 3,\n  \"status\": \"confirmed\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/blockchain", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","blockchain"] } } },
         { "name": "Cards", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"card_id\": \"card_123\",\n  \"event\": \"activated\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/cards", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","cards"] } } },
         { "name": "Chain Deposit", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"txid\": \"0xabc123\",\n  \"address\": \"0x123abc\",\n  \"amount\": \"0.5\",\n  \"asset\": \"ETH\",\n  \"confirmations\": 12,\n  \"status\": \"confirmed\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/chain-deposit", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","chain-deposit"] } } },
-        { "name": "Brokerage Fill", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"status\": \"filled\",\n  \"fills\": [\n    {\n      \"symbol\": \"BTC\",\n      \"quantity\": \"0.1\",\n      \"price\": \"35000.00\"\n    }\n  ],\n  \"signature\": \"abc123signature\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/brokerage-fills", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","brokerage-fills"] } } }
+        { "name": "Brokerage Fill (Commented in routes)", "request": { "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"orderId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"status\": \"filled\",\n  \"fills\": [\n    {\n      \"symbol\": \"BTC\",\n      \"quantity\": \"0.1\",\n      \"price\": \"35000.00\"\n    }\n  ],\n  \"signature\": \"abc123signature\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/webhooks/brokerage-fills", "host": ["{{base_url}}"], "path": ["api","v1","webhooks","brokerage-fills"] } } }
       ]
     },
     {
@@ -286,6 +286,73 @@
         { "name": "Get Latest Summary", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/ai/summary/latest", "host": ["{{base_url}}"], "path": ["api","v1","ai","summary","latest"] } } },
         { "name": "Analyze On Demand", "request": { "method": "POST", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" } ], "body": { "mode": "raw", "raw": "{\n  \"portfolio_id\": \"portfolio_123\",\n  \"analysis_type\": \"risk\"\n}" }, "url": { "raw": "{{base_url}}/api/v1/ai/analyze", "host": ["{{base_url}}"], "path": ["api","v1","ai","analyze"] } } },
         { "name": "Health", "request": { "method": "GET", "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ], "url": { "raw": "{{base_url}}/api/v1/ai/health", "host": ["{{base_url}}"], "path": ["api","v1","ai","health"] } } }
+      ]
+    },
+    {
+      "name": "ZeroG Internal",
+      "item": [
+        {
+          "name": "Health - Storage",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "X-Internal-API-Key", "value": "test-api-key" } ],
+            "url": { "raw": "{{base_url}}/_internal/0g/health/storage", "host": ["{{base_url}}"], "path": ["_internal","0g","health","storage"] }
+          }
+        },
+        {
+          "name": "Health - Inference",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "X-Internal-API-Key", "value": "test-api-key" } ],
+            "url": { "raw": "{{base_url}}/_internal/0g/health/inference", "host": ["{{base_url}}"], "path": ["_internal","0g","health","inference"] }
+          }
+        },
+        {
+          "name": "Health - Namespace",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "X-Internal-API-Key", "value": "test-api-key" } ],
+            "url": { "raw": "{{base_url}}/_internal/0g/health/namespace", "host": ["{{base_url}}"], "path": ["_internal","0g","health","namespace"] }
+          }
+        },
+        {
+          "name": "Health - All",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "X-Internal-API-Key", "value": "test-api-key" } ],
+            "url": { "raw": "{{base_url}}/_internal/0g/health/all", "host": ["{{base_url}}"], "path": ["_internal","0g","health","all"] }
+          }
+        },
+        {
+          "name": "Store Data",
+          "request": {
+            "method": "POST",
+            "header": [ 
+              { "key": "X-Internal-API-Key", "value": "test-api-key" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": \"example data to store\",\n  \"metadata\": {\n    \"type\": \"test\",\n    \"version\": \"1.0\"\n  }\n}"
+            },
+            "url": { "raw": "{{base_url}}/_internal/0g/storage/store", "host": ["{{base_url}}"], "path": ["_internal","0g","storage","store"] }
+          }
+        },
+        {
+          "name": "Generate AI",
+          "request": {
+            "method": "POST",
+            "header": [ 
+              { "key": "X-Internal-API-Key", "value": "test-api-key" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Analyze the market trends\",\n  \"model\": \"gpt-4\",\n  \"max_tokens\": 1000\n}"
+            },
+            "url": { "raw": "{{base_url}}/_internal/0g/inference/generate", "host": ["{{base_url}}"], "path": ["_internal","0g","inference","generate"] }
+          }
+        }
       ]
     },
     {

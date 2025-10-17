@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/stack-service/stack_service/internal/domain/entities"
-	"github.com/stack-service/stack_service/internal/infrastructure/adapters"
 	"github.com/stack-service/stack_service/internal/infrastructure/cache"
 	"github.com/stack-service/stack_service/internal/infrastructure/config"
 )
@@ -32,28 +31,36 @@ type VerificationService interface {
 }
 
 // verificationService implements VerificationService
+type VerificationEmailSender interface {
+	SendVerificationEmail(ctx context.Context, email, code string) error
+}
+
+type VerificationSMSSender interface {
+	SendVerificationSMS(ctx context.Context, phone, code string) error
+}
+
 type verificationService struct {
-	redisClient  cache.RedisClient
-	emailService adapters.EmailService
-	smsService   adapters.SMSService
-	logger       *zap.Logger
-	config       *config.Config
+	redisClient cache.RedisClient
+	emailSender VerificationEmailSender
+	smsSender   VerificationSMSSender
+	logger      *zap.Logger
+	config      *config.Config
 }
 
 // NewVerificationService creates a new VerificationService
 func NewVerificationService(
 	redisClient cache.RedisClient,
-	emailService adapters.EmailService,
-	smsService adapters.SMSService,
+	emailSender VerificationEmailSender,
+	smsSender VerificationSMSSender,
 	logger *zap.Logger,
 	cfg *config.Config,
 ) VerificationService {
 	return &verificationService{
-		redisClient:  redisClient,
-		emailService: emailService,
-		smsService:   smsService,
-		logger:       logger,
-		config:       cfg,
+		redisClient: redisClient,
+		emailSender: emailSender,
+		smsSender:   smsSender,
+		logger:      logger,
+		config:      cfg,
 	}
 }
 
@@ -98,9 +105,15 @@ func (s *verificationService) GenerateAndSendCode(ctx context.Context, identifie
 
 	var sendErr error
 	if identifierType == "email" {
-		sendErr = s.emailService.SendVerificationEmail(ctx, identifier, code)
+		if s.emailSender == nil {
+			return "", fmt.Errorf("email service not configured")
+		}
+		sendErr = s.emailSender.SendVerificationEmail(ctx, identifier, code)
 	} else if identifierType == "phone" {
-		sendErr = s.smsService.SendVerificationSMS(ctx, identifier, code)
+		if s.smsSender == nil {
+			return "", fmt.Errorf("sms service not configured")
+		}
+		sendErr = s.smsSender.SendVerificationSMS(ctx, identifier, code)
 	} else {
 		return "", fmt.Errorf("unsupported identifier type: %s", identifierType)
 	}

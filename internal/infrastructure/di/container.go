@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -119,33 +120,62 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 
 	// Initialize KYC provider with full configuration
 	kycProviderConfig := adapters.KYCProviderConfig{
+		Provider:    cfg.KYC.Provider,
 		APIKey:      cfg.KYC.APIKey,
 		APISecret:   cfg.KYC.APISecret,
 		BaseURL:     cfg.KYC.BaseURL,
 		Environment: cfg.KYC.Environment,
 		CallbackURL: cfg.KYC.CallbackURL,
 		UserAgent:   cfg.KYC.UserAgent,
+		LevelName:   cfg.KYC.LevelName,
 	}
-	kycProvider := adapters.NewKYCProvider(zapLog, kycProviderConfig)
+	var kycProvider *adapters.KYCProvider
+	var err error
+	if strings.TrimSpace(cfg.KYC.Provider) != "" {
+		kycProvider, err = adapters.NewKYCProvider(zapLog, kycProviderConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize KYC provider: %w", err)
+		}
+	} else {
+		zapLog.Warn("KYC provider not configured; KYC features disabled")
+	}
 
 	// Initialize email service with full configuration
 	emailServiceConfig := adapters.EmailServiceConfig{
+		Provider:    cfg.Email.Provider,
 		APIKey:      cfg.Email.APIKey,
 		FromEmail:   cfg.Email.FromEmail,
 		FromName:    cfg.Email.FromName,
 		Environment: cfg.Email.Environment,
 		BaseURL:     cfg.Email.BaseURL,
+		ReplyTo:     cfg.Email.ReplyTo,
 	}
-	emailService := adapters.NewEmailService(zapLog, emailServiceConfig)
+	var emailService *adapters.EmailService
+	if strings.TrimSpace(cfg.Email.Provider) != "" {
+		emailService, err = adapters.NewEmailService(zapLog, emailServiceConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize email service: %w", err)
+		}
+	} else {
+		zapLog.Warn("Email provider not configured; email notifications disabled")
+	}
 
 	// Initialize SMS service
-	smsService := adapters.NewSMSService(zapLog, adapters.SMSConfig{
-		Provider:    cfg.SMS.Provider,
-		APIKey:      cfg.SMS.APIKey,
-		APISecret:   cfg.SMS.APISecret,
-		FromNumber:  cfg.SMS.FromNumber,
-		Environment: cfg.SMS.Environment,
-	})
+	var smsService *adapters.SMSService
+	if strings.TrimSpace(cfg.SMS.Provider) != "" {
+		smsService, err = adapters.NewSMSService(zapLog, adapters.SMSConfig{
+			Provider:    cfg.SMS.Provider,
+			APIKey:      cfg.SMS.APIKey,
+			APISecret:   cfg.SMS.APISecret,
+			FromNumber:  cfg.SMS.FromNumber,
+			Environment: cfg.SMS.Environment,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize SMS service: %w", err)
+		}
+	} else {
+		zapLog.Warn("SMS provider not configured; SMS notifications disabled")
+	}
 
 	// Initialize Redis client
 	redisClient, err := cache.NewRedisClient(&cfg.Redis, zapLog)
@@ -209,8 +239,8 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 	// Initialize verification and onboarding job services
 	container.VerificationService = services.NewVerificationService(
 		container.RedisClient,
-		*container.EmailService,
-		*container.SMSService,
+		container.EmailService,
+		container.SMSService,
 		container.ZapLog,
 		container.Config,
 	)

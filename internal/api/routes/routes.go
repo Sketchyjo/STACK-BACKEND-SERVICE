@@ -66,26 +66,32 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 				*container.UserRepo,
 				container.GetVerificationService(),
 				*container.GetOnboardingJobService(),
+				container.EmailService,
+				container.KYCProvider,
 			)
 			auth.POST("/register", authSignupHandlers.Register)
 			auth.POST("/verify-code", authSignupHandlers.VerifyCode)
 			auth.POST("/resend-code", authSignupHandlers.ResendCode)
 
-			auth.POST("/login", handlers.Login(container.DB, container.Config, container.Logger))
+			auth.POST("/login", handlers.Login(container.DB, container.Config, container.Logger, container.EmailService))
 			auth.POST("/refresh", handlers.RefreshToken(container.DB, container.Config, container.Logger))
 			auth.POST("/logout", handlers.Logout(container.DB, container.Config, container.Logger))
 			auth.POST("/forgot-password", handlers.ForgotPassword(container.DB, container.Config, container.Logger))
 			auth.POST("/reset-password", handlers.ResetPassword(container.DB, container.Config, container.Logger))
 			auth.POST("/verify-email", handlers.VerifyEmail(container.DB, container.Config, container.Logger))
 		}
-  
+
 		// Onboarding routes - OpenAPI spec compliant
 		onboarding := v1.Group("/onboarding")
-		onboarding.Use(middleware.MockAuthMiddleware()) // Use mock auth for development
 		{
 			onboarding.POST("/start", onboardingHandlers.StartOnboarding)
-			onboarding.GET("/status", onboardingHandlers.GetOnboardingStatus)
-			onboarding.POST("/kyc/submit", onboardingHandlers.SubmitKYC)
+
+			authenticatedOnboarding := onboarding.Group("/")
+			authenticatedOnboarding.Use(middleware.Authentication(container.Config, container.Logger))
+			{
+				authenticatedOnboarding.GET("/status", onboardingHandlers.GetOnboardingStatus)
+				authenticatedOnboarding.POST("/kyc/submit", onboardingHandlers.SubmitKYC)
+			}
 		}
 
 		// KYC provider webhooks (no auth required for external callbacks)

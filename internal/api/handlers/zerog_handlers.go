@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -17,11 +18,11 @@ import (
 
 // ZeroGHandler handles internal 0G Network operations
 type ZeroGHandler struct {
-	storageClient     entities.ZeroGStorageClient
-	inferenceGateway  entities.ZeroGInferenceGateway
-	namespaceManager  *zerog.NamespaceManager
-	logger            *zap.Logger
-	tracer            trace.Tracer
+	storageClient    entities.ZeroGStorageClient
+	inferenceGateway entities.ZeroGInferenceGateway
+	namespaceManager *zerog.NamespaceManager
+	logger           *zap.Logger
+	tracer           trace.Tracer
 }
 
 // NewZeroGHandler creates a new 0G handler
@@ -54,17 +55,17 @@ type HealthResponse struct {
 
 // ServiceHealth represents the health of a specific service
 type ServiceHealth struct {
-	Status    string                 `json:"status"`
-	Latency   string                 `json:"latency"`
-	Version   string                 `json:"version,omitempty"`
-	Metrics   map[string]interface{} `json:"metrics,omitempty"`
-	Errors    []string               `json:"errors,omitempty"`
+	Status  string                 `json:"status"`
+	Latency string                 `json:"latency"`
+	Version string                 `json:"version,omitempty"`
+	Metrics map[string]interface{} `json:"metrics,omitempty"`
+	Errors  []string               `json:"errors,omitempty"`
 }
 
 // StoreRequest represents a storage request
 type StoreRequest struct {
 	Namespace string            `json:"namespace" binding:"required"`
-	Data      string            `json:"data" binding:"required"`      // Base64 encoded data
+	Data      string            `json:"data" binding:"required"` // Base64 encoded data
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	UserID    string            `json:"user_id,omitempty"`
 }
@@ -81,36 +82,37 @@ type StoreResponse struct {
 
 // GenerateRequest represents an inference request
 type GenerateRequest struct {
-	Type      string                 `json:"type" binding:"required"` // "weekly_summary" or "analysis"
-	UserID    string                 `json:"user_id" binding:"required"`
-	WeekStart *time.Time             `json:"week_start,omitempty"`
-	AnalysisType string              `json:"analysis_type,omitempty"`
-	Parameters   map[string]interface{} `json:"parameters,omitempty"`
-	// Mock portfolio data for testing
-	MockPortfolioData *MockPortfolioData `json:"mock_portfolio_data,omitempty"`
+	Type          string                 `json:"type" binding:"required"` // "weekly_summary" or "analysis"
+	UserID        string                 `json:"user_id" binding:"required"`
+	WeekStart     *time.Time             `json:"week_start,omitempty"`
+	AnalysisType  string                 `json:"analysis_type,omitempty"`
+	Parameters    map[string]interface{} `json:"parameters,omitempty"`
+	PortfolioData *PortfolioSnapshot     `json:"portfolio_data" binding:"required"`
 }
 
-// MockPortfolioData represents mock portfolio data for testing
-type MockPortfolioData struct {
+// PortfolioSnapshot represents the portfolio state supplied by the caller
+type PortfolioSnapshot struct {
 	TotalValue     float64 `json:"total_value"`
 	TotalReturn    float64 `json:"total_return"`
 	TotalReturnPct float64 `json:"total_return_pct"`
 	WeekChange     float64 `json:"week_change"`
 	WeekChangePct  float64 `json:"week_change_pct"`
+	DayChange      float64 `json:"day_change"`
+	DayChangePct   float64 `json:"day_change_pct"`
 }
 
 // GenerateResponse represents an inference response
 type GenerateResponse struct {
-	Success        bool                   `json:"success"`
-	RequestID      string                 `json:"request_id,omitempty"`
-	Content        string                 `json:"content,omitempty"`
-	ContentType    string                 `json:"content_type,omitempty"`
-	TokensUsed     int                    `json:"tokens_used,omitempty"`
-	ProcessingTime string                 `json:"processing_time,omitempty"`
-	Model          string                 `json:"model,omitempty"`
-	ArtifactURI    string                 `json:"artifact_uri,omitempty"`
-	CreatedAt      time.Time              `json:"created_at,omitempty"`
-	Error          string                 `json:"error,omitempty"`
+	Success        bool      `json:"success"`
+	RequestID      string    `json:"request_id,omitempty"`
+	Content        string    `json:"content,omitempty"`
+	ContentType    string    `json:"content_type,omitempty"`
+	TokensUsed     int       `json:"tokens_used,omitempty"`
+	ProcessingTime string    `json:"processing_time,omitempty"`
+	Model          string    `json:"model,omitempty"`
+	ArtifactURI    string    `json:"artifact_uri,omitempty"`
+	CreatedAt      time.Time `json:"created_at,omitempty"`
+	Error          string    `json:"error,omitempty"`
 }
 
 // HealthCheck performs a health check on 0G services
@@ -151,7 +153,7 @@ func (h *ZeroGHandler) HealthCheck(c *gin.Context) {
 	if req.Service == "all" || req.Service == "storage" {
 		storageHealth := h.checkStorageHealth(ctx)
 		response.Services["storage"] = storageHealth
-		
+
 		if storageHealth.Status != entities.HealthStatusHealthy {
 			response.Overall = entities.HealthStatusDegraded
 		}
@@ -161,7 +163,7 @@ func (h *ZeroGHandler) HealthCheck(c *gin.Context) {
 	if req.Service == "all" || req.Service == "inference" {
 		inferenceHealth := h.checkInferenceHealth(ctx)
 		response.Services["inference"] = inferenceHealth
-		
+
 		if inferenceHealth.Status != entities.HealthStatusHealthy {
 			if response.Overall == entities.HealthStatusHealthy {
 				response.Overall = entities.HealthStatusDegraded
@@ -175,7 +177,7 @@ func (h *ZeroGHandler) HealthCheck(c *gin.Context) {
 	if req.Service == "all" || req.Service == "namespace" {
 		namespaceHealth := h.checkNamespaceHealth(ctx)
 		response.Services["namespace"] = namespaceHealth
-		
+
 		if namespaceHealth.Status != entities.HealthStatusHealthy {
 			response.Overall = entities.HealthStatusDegraded
 		}
@@ -207,7 +209,7 @@ func (h *ZeroGHandler) Store(c *gin.Context) {
 
 	var req StoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Warn("Invalid store request", 
+		h.logger.Warn("Invalid store request",
 			zap.Error(err),
 			zap.String("request_id", getRequestID(c)),
 		)
@@ -254,7 +256,7 @@ func (h *ZeroGHandler) Store(c *gin.Context) {
 			zap.String("namespace", req.Namespace),
 			zap.String("request_id", getRequestID(c)),
 		)
-		
+
 		c.JSON(http.StatusInternalServerError, StoreResponse{
 			Success: false,
 			Error:   err.Error(),
@@ -297,7 +299,7 @@ func (h *ZeroGHandler) Generate(c *gin.Context) {
 
 	var req GenerateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Warn("Invalid generate request", 
+		h.logger.Warn("Invalid generate request",
 			zap.Error(err),
 			zap.String("request_id", getRequestID(c)),
 		)
@@ -341,12 +343,20 @@ func (h *ZeroGHandler) Generate(c *gin.Context) {
 			weekStart = *req.WeekStart
 		}
 
-		// Build mock request for demonstration
+		metrics, buildErr := h.buildPortfolioMetrics(req.PortfolioData)
+		if buildErr != nil {
+			c.JSON(http.StatusBadRequest, GenerateResponse{
+				Success: false,
+				Error:   buildErr.Error(),
+			})
+			return
+		}
+
 		summaryRequest := &entities.WeeklySummaryRequest{
-			UserID:    userID,
-			WeekStart: weekStart,
-			WeekEnd:   weekStart.AddDate(0, 0, 6),
-			PortfolioData: h.buildMockPortfolioMetrics(req.MockPortfolioData),
+			UserID:        userID,
+			WeekStart:     weekStart,
+			WeekEnd:       weekStart.AddDate(0, 0, 6),
+			PortfolioData: metrics,
 			Preferences: &entities.UserPreferences{
 				RiskTolerance:  "moderate",
 				PreferredStyle: "summary",
@@ -362,10 +372,19 @@ func (h *ZeroGHandler) Generate(c *gin.Context) {
 			req.AnalysisType = entities.AnalysisTypePerformance
 		}
 
+		metrics, buildErr := h.buildPortfolioMetrics(req.PortfolioData)
+		if buildErr != nil {
+			c.JSON(http.StatusBadRequest, GenerateResponse{
+				Success: false,
+				Error:   buildErr.Error(),
+			})
+			return
+		}
+
 		analysisRequest := &entities.AnalysisRequest{
 			UserID:        userID,
 			AnalysisType:  req.AnalysisType,
-			PortfolioData: h.buildMockPortfolioMetrics(req.MockPortfolioData),
+			PortfolioData: metrics,
 			Preferences: &entities.UserPreferences{
 				RiskTolerance:  "moderate",
 				PreferredStyle: "detailed",
@@ -393,7 +412,7 @@ func (h *ZeroGHandler) Generate(c *gin.Context) {
 			zap.String("user_id", req.UserID),
 			zap.String("request_id", getRequestID(c)),
 		)
-		
+
 		c.JSON(http.StatusInternalServerError, GenerateResponse{
 			Success: false,
 			Error:   err.Error(),
@@ -428,7 +447,7 @@ func (h *ZeroGHandler) Generate(c *gin.Context) {
 // checkStorageHealth checks the health of the storage service
 func (h *ZeroGHandler) checkStorageHealth(ctx context.Context) *ServiceHealth {
 	start := time.Now()
-	
+
 	health, err := h.storageClient.HealthCheck(ctx)
 	if err != nil {
 		return &ServiceHealth{
@@ -450,7 +469,7 @@ func (h *ZeroGHandler) checkStorageHealth(ctx context.Context) *ServiceHealth {
 // checkInferenceHealth checks the health of the inference service
 func (h *ZeroGHandler) checkInferenceHealth(ctx context.Context) *ServiceHealth {
 	start := time.Now()
-	
+
 	health, err := h.inferenceGateway.HealthCheck(ctx)
 	if err != nil {
 		return &ServiceHealth{
@@ -472,7 +491,7 @@ func (h *ZeroGHandler) checkInferenceHealth(ctx context.Context) *ServiceHealth 
 // checkNamespaceHealth checks the health of the namespace manager
 func (h *ZeroGHandler) checkNamespaceHealth(ctx context.Context) *ServiceHealth {
 	start := time.Now()
-	
+
 	health, err := h.namespaceManager.HealthCheck(ctx)
 	if err != nil {
 		return &ServiceHealth{
@@ -491,82 +510,19 @@ func (h *ZeroGHandler) checkNamespaceHealth(ctx context.Context) *ServiceHealth 
 	}
 }
 
-// buildMockPortfolioMetrics builds mock portfolio metrics for testing
-func (h *ZeroGHandler) buildMockPortfolioMetrics(mockData *MockPortfolioData) *entities.PortfolioMetrics {
-	if mockData == nil {
-		// Default mock data
-		mockData = &MockPortfolioData{
-			TotalValue:     50000.0,
-			TotalReturn:    2500.0,
-			TotalReturnPct: 5.26,
-			WeekChange:     750.0,
-			WeekChangePct:  1.52,
-		}
+// buildPortfolioMetrics maps request data into portfolio metrics
+func (h *ZeroGHandler) buildPortfolioMetrics(data *PortfolioSnapshot) (*entities.PortfolioMetrics, error) {
+	if data == nil {
+		return nil, fmt.Errorf("portfolio_data is required")
 	}
 
 	return &entities.PortfolioMetrics{
-		TotalValue:       mockData.TotalValue,
-		TotalReturn:      mockData.TotalReturn,
-		TotalReturnPct:   mockData.TotalReturnPct,
-		WeekChange:       mockData.WeekChange,
-		WeekChangePct:    mockData.WeekChangePct,
-		DayChange:        150.0,
-		DayChangePct:     0.30,
-		MonthChange:      1250.0,
-		MonthChangePct:   2.56,
-		Positions: []entities.PositionMetrics{
-			{
-				BasketID:        uuid.New(),
-				BasketName:      "Tech Growth",
-				Quantity:        100.0,
-				AvgPrice:        250.0,
-				CurrentValue:    27500.0,
-				UnrealizedPL:    2500.0,
-				UnrealizedPLPct: 10.0,
-				Weight:          0.55,
-			},
-			{
-				BasketID:        uuid.New(),
-				BasketName:      "Balanced Growth",
-				Quantity:        75.0,
-				AvgPrice:        200.0,
-				CurrentValue:    15000.0,
-				UnrealizedPL:    0.0,
-				UnrealizedPLPct: 0.0,
-				Weight:          0.30,
-			},
-			{
-				BasketID:        uuid.New(),
-				BasketName:      "Conservative Income",
-				Quantity:        50.0,
-				AvgPrice:        150.0,
-				CurrentValue:    7500.0,
-				UnrealizedPL:    0.0,
-				UnrealizedPLPct: 0.0,
-				Weight:          0.15,
-			},
-		},
-		AllocationByBasket: map[string]float64{
-			"Tech Growth":        0.55,
-			"Balanced Growth":    0.30,
-			"Conservative Income": 0.15,
-		},
-		RiskMetrics: &entities.RiskMetrics{
-			Volatility:      0.12,
-			Beta:           1.05,
-			SharpeRatio:    0.85,
-			MaxDrawdown:    0.08,
-			VaR:            0.04,
-			Diversification: 0.78,
-		},
-		PerformanceHistory: []entities.PerformancePoint{
-			{Date: time.Now().AddDate(0, 0, -6), Value: 47500.0, PnL: 0.0},
-			{Date: time.Now().AddDate(0, 0, -5), Value: 48000.0, PnL: 500.0},
-			{Date: time.Now().AddDate(0, 0, -4), Value: 48500.0, PnL: 1000.0},
-			{Date: time.Now().AddDate(0, 0, -3), Value: 49000.0, PnL: 1500.0},
-			{Date: time.Now().AddDate(0, 0, -2), Value: 49250.0, PnL: 1750.0},
-			{Date: time.Now().AddDate(0, 0, -1), Value: 49750.0, PnL: 2250.0},
-			{Date: time.Now(), Value: mockData.TotalValue, PnL: mockData.TotalReturn},
-		},
-	}
+		TotalValue:     data.TotalValue,
+		TotalReturn:    data.TotalReturn,
+		TotalReturnPct: data.TotalReturnPct,
+		WeekChange:     data.WeekChange,
+		WeekChangePct:  data.WeekChangePct,
+		DayChange:      data.DayChange,
+		DayChangePct:   data.DayChangePct,
+	}, nil
 }

@@ -126,26 +126,28 @@ type CircleConfig struct {
 }
 
 type KYCConfig struct {
-	Provider    string `mapstructure:"provider"` // "jumio", "onfido", "mock"
+	Provider    string `mapstructure:"provider"` // "sumsub", "jumio"
 	APIKey      string `mapstructure:"api_key"`
 	APISecret   string `mapstructure:"api_secret"`
 	BaseURL     string `mapstructure:"base_url"`
 	CallbackURL string `mapstructure:"callback_url"`
 	Environment string `mapstructure:"environment"` // "development", "sandbox", "production"
 	UserAgent   string `mapstructure:"user_agent"`
+	LevelName   string `mapstructure:"level_name"`
 }
 
 type EmailConfig struct {
-	Provider    string `mapstructure:"provider"` // "sendgrid", "ses", "mock"
+	Provider    string `mapstructure:"provider"` // "sendgrid", "resend"
 	APIKey      string `mapstructure:"api_key"`
 	FromEmail   string `mapstructure:"from_email"`
 	FromName    string `mapstructure:"from_name"`
 	BaseURL     string `mapstructure:"base_url"`    // For verification links
 	Environment string `mapstructure:"environment"` // "development", "staging", "production"
+	ReplyTo     string `mapstructure:"reply_to"`
 }
 
 type SMSConfig struct {
-	Provider    string `mapstructure:"provider"` // "twilio", "mock"
+	Provider    string `mapstructure:"provider"` // "twilio"
 	APIKey      string `mapstructure:"api_key"`
 	APISecret   string `mapstructure:"api_secret"`
 	FromNumber  string `mapstructure:"from_number"`
@@ -311,20 +313,22 @@ func setDefaults() {
 	viper.SetDefault("circle.api_key", "")
 
 	// KYC defaults
-	viper.SetDefault("kyc.provider", "mock")
+	viper.SetDefault("kyc.provider", "")
 	viper.SetDefault("kyc.environment", "development")
 	viper.SetDefault("kyc.base_url", "https://netverify.com")
 	viper.SetDefault("kyc.user_agent", "Stack-Service/1.0")
+	viper.SetDefault("kyc.level_name", "basic-kyc")
 
 	// Email defaults
-	viper.SetDefault("email.provider", "mock")
+	viper.SetDefault("email.provider", "")
 	viper.SetDefault("email.from_email", "no-reply@stackservice.com")
 	viper.SetDefault("email.from_name", "Stack Service")
 	viper.SetDefault("email.environment", "development")
 	viper.SetDefault("email.base_url", "http://localhost:3000")
+	viper.SetDefault("email.reply_to", "")
 
 	// SMS defaults
-	viper.SetDefault("sms.provider", "mock")
+	viper.SetDefault("sms.provider", "")
 	viper.SetDefault("sms.environment", "development")
 
 	// Verification defaults
@@ -402,8 +406,15 @@ func overrideFromEnv() {
 	if kycAPIKey := os.Getenv("KYC_API_KEY"); kycAPIKey != "" {
 		viper.Set("kyc.api_key", kycAPIKey)
 	}
+	if sumsubToken := os.Getenv("SUMSUB_APP_TOKEN"); sumsubToken != "" {
+		viper.Set("kyc.api_key", sumsubToken)
+		viper.Set("kyc.provider", "sumsub")
+	}
 	if kycAPISecret := os.Getenv("KYC_API_SECRET"); kycAPISecret != "" {
 		viper.Set("kyc.api_secret", kycAPISecret)
+	}
+	if sumsubSecret := os.Getenv("SUMSUB_SECRET_KEY"); sumsubSecret != "" {
+		viper.Set("kyc.api_secret", sumsubSecret)
 	}
 	if kycProvider := os.Getenv("KYC_PROVIDER"); kycProvider != "" {
 		viper.Set("kyc.provider", kycProvider)
@@ -411,16 +422,50 @@ func overrideFromEnv() {
 	if kycCallbackURL := os.Getenv("KYC_CALLBACK_URL"); kycCallbackURL != "" {
 		viper.Set("kyc.callback_url", kycCallbackURL)
 	}
+	if kycBaseURL := os.Getenv("KYC_BASE_URL"); kycBaseURL != "" {
+		viper.Set("kyc.base_url", kycBaseURL)
+	}
+	if sumsubBaseURL := os.Getenv("SUMSUB_BASE_URL"); sumsubBaseURL != "" {
+		viper.Set("kyc.base_url", sumsubBaseURL)
+	}
+	if kycLevelName := os.Getenv("KYC_LEVEL_NAME"); kycLevelName != "" {
+		viper.Set("kyc.level_name", kycLevelName)
+	}
+	if sumsubLevelName := os.Getenv("SUMSUB_LEVEL_NAME"); sumsubLevelName != "" {
+		viper.Set("kyc.level_name", sumsubLevelName)
+	}
 
 	// Email Service
 	if emailAPIKey := os.Getenv("EMAIL_API_KEY"); emailAPIKey != "" {
 		viper.Set("email.api_key", emailAPIKey)
+	}
+	if resendAPIKey := os.Getenv("RESEND_API_KEY"); resendAPIKey != "" {
+		viper.Set("email.api_key", resendAPIKey)
+		viper.Set("email.provider", "resend")
 	}
 	if emailProvider := os.Getenv("EMAIL_PROVIDER"); emailProvider != "" {
 		viper.Set("email.provider", emailProvider)
 	}
 	if baseURL := os.Getenv("BASE_URL"); baseURL != "" {
 		viper.Set("email.base_url", baseURL)
+	}
+	if emailBaseURL := os.Getenv("EMAIL_BASE_URL"); emailBaseURL != "" {
+		viper.Set("email.base_url", emailBaseURL)
+	}
+	if fromEmail := os.Getenv("EMAIL_FROM_EMAIL"); fromEmail != "" {
+		viper.Set("email.from_email", fromEmail)
+	}
+	if resendFrom := os.Getenv("RESEND_FROM_EMAIL"); resendFrom != "" {
+		viper.Set("email.from_email", resendFrom)
+	}
+	if fromName := os.Getenv("EMAIL_FROM_NAME"); fromName != "" {
+		viper.Set("email.from_name", fromName)
+	}
+	if resendFromName := os.Getenv("RESEND_FROM_NAME"); resendFromName != "" {
+		viper.Set("email.from_name", resendFromName)
+	}
+	if replyTo := os.Getenv("EMAIL_REPLY_TO"); replyTo != "" {
+		viper.Set("email.reply_to", replyTo)
 	}
 
 	// 0G Network

@@ -224,6 +224,22 @@ go run cmd/main.go
 - Swagger: http://localhost:8080/swagger/index.html
 - Metrics: http://localhost:8080/metrics
 
+### Database Maintenance
+
+The helper scripts in `scripts/` expect `DATABASE_URL` to point at the target Postgres instance (they will read `.env` automatically if present).
+
+- **Wipe all data** without running migrations:
+  ```bash
+  ./scripts/db_wipe.sh
+  ```
+  Add `--force` to skip the confirmation prompt.
+
+- **Reset the schema** by wiping data and reapplying migrations:
+  ```bash
+  ./scripts/db_reset.sh
+  ```
+  Optional flags: `--force` to skip confirmation, `--skip-migrate` to leave the database empty, `--seed` to run `go run scripts/seed.go` after migrations.
+
 ## 📚 API Documentation
 
 ### Authentication
