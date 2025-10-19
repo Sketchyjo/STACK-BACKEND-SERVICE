@@ -238,6 +238,9 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 			}
 		}
 
+		// Admin bootstrap route (enforces super admin token after initial creation)
+		v1.POST("/admin/users", handlers.CreateAdmin(container.DB, container.Config, container.Logger))
+
 		// Admin routes (admin auth required)
 		admin := v1.Group("/admin")
 		admin.Use(middleware.Authentication(container.Config, container.Logger))

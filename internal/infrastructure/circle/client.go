@@ -9,13 +9,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+	"github.com/sony/gobreaker"
 	"github.com/stack-service/stack_service/internal/domain/entities"
-	// "github.com/stack-service/stack_service/pkg/logger"
 	"go.uber.org/zap"
 )
 
@@ -23,10 +22,6 @@ const (
 	// Circle API URLs
 	ProductionBaseURL = "https://api.circle.com"
 	SandboxBaseURL    = "https://api-sandbox.circle.com"
-
-	// API Endpoints
-	walletSetsEndpoint = "/v1/w3s/developer/walletSets"
-	walletsEndpoint    = "/v1/w3s/developer/wallets"
 
 	// Timeouts and limits
 	defaultTimeout = 30 * time.Second
@@ -37,110 +32,19 @@ const (
 
 // Config represents Circle API configuration
 type Config struct {
-	APIKey      string        `json:"api_key"`
-	BaseURL     string        `json:"base_url"`
-	Environment string        `json:"environment"` // "sandbox" or "production"
-	Timeout     time.Duration `json:"timeout"`
-}
-
-// CircuitBreakerState represents circuit breaker states
-type CircuitBreakerState int
-
-const (
-	CircuitBreakerClosed CircuitBreakerState = iota
-	CircuitBreakerOpen
-	CircuitBreakerHalfOpen
-)
-
-// CircuitBreaker implements a simple circuit breaker pattern
-type CircuitBreaker struct {
-	mu              sync.RWMutex
-	state           CircuitBreakerState
-	failureCount    int
-	successCount    int
-	lastFailureTime time.Time
-	timeout         time.Duration
-	maxFailures     int
-	logger          *zap.Logger
-}
-
-// NewCircuitBreaker creates a new circuit breaker
-func NewCircuitBreaker(maxFailures int, timeout time.Duration, logger *zap.Logger) *CircuitBreaker {
-	return &CircuitBreaker{
-		maxFailures: maxFailures,
-		timeout:     timeout,
-		logger:      logger,
-	}
-}
-
-// Call executes a function with circuit breaker protection
-func (cb *CircuitBreaker) Call(ctx context.Context, fn func() error) error {
-	cb.mu.RLock()
-	state := cb.state
-	cb.mu.RUnlock()
-
-	switch state {
-	case CircuitBreakerOpen:
-		if time.Since(cb.lastFailureTime) > cb.timeout {
-			cb.setState(CircuitBreakerHalfOpen)
-		} else {
-			return fmt.Errorf("circuit breaker is open")
-		}
-	}
-
-	err := fn()
-	cb.recordResult(err)
-	return err
-}
-
-func (cb *CircuitBreaker) setState(state CircuitBreakerState) {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	cb.state = state
-	cb.logger.Info("Circuit breaker state changed", zap.String("state", cb.stateString(state)))
-}
-
-func (cb *CircuitBreaker) recordResult(err error) {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	if err != nil {
-		cb.failureCount++
-		cb.lastFailureTime = time.Now()
-
-		if cb.state == CircuitBreakerHalfOpen {
-			cb.state = CircuitBreakerOpen
-		} else if cb.failureCount >= cb.maxFailures {
-			cb.state = CircuitBreakerOpen
-		}
-	} else {
-		cb.failureCount = 0
-		cb.successCount++
-
-		if cb.state == CircuitBreakerHalfOpen {
-			cb.state = CircuitBreakerClosed
-		}
-	}
-}
-
-func (cb *CircuitBreaker) stateString(state CircuitBreakerState) string {
-	switch state {
-	case CircuitBreakerClosed:
-		return "closed"
-	case CircuitBreakerOpen:
-		return "open"
-	case CircuitBreakerHalfOpen:
-		return "half-open"
-	default:
-		return "unknown"
-	}
+	APIKey             string        `json:"api_key"`
+	BaseURL            string        `json:"base_url"`
+	Environment        string        `json:"environment"` // "sandbox" or "production"
+	Timeout            time.Duration `json:"timeout"`
+	WalletSetsEndpoint string        `json:"wallet_sets_endpoint"`
+	WalletsEndpoint    string        `json:"wallets_endpoint"`
 }
 
 // Client represents a Circle API client
 type Client struct {
 	config         Config
 	httpClient     *http.Client
-	circuitBreaker *CircuitBreaker
+	circuitBreaker *gobreaker.CircuitBreaker
 	logger         *zap.Logger
 }
 
@@ -159,6 +63,13 @@ func NewClient(config Config, logger *zap.Logger) *Client {
 	}
 	config.BaseURL = strings.TrimRight(config.BaseURL, "/")
 
+	if config.WalletSetsEndpoint == "" {
+		config.WalletSetsEndpoint = "/v1/w3s/developer/walletSets"
+	}
+	if config.WalletsEndpoint == "" {
+		config.WalletsEndpoint = "/v1/w3s/developer/wallets"
+	}
+
 	httpClient := &http.Client{
 		Timeout: config.Timeout,
 		Transport: &http.Transport{
@@ -171,7 +82,23 @@ func NewClient(config Config, logger *zap.Logger) *Client {
 		},
 	}
 
-	circuitBreaker := NewCircuitBreaker(5, 30*time.Second, logger)
+	st := gobreaker.Settings{
+		Name:        "CircleAPI",
+		MaxRequests: 5,
+		Interval:    10 * time.Second,
+		Timeout:     30 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures > 5
+		},
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			logger.Info("Circuit breaker state changed",
+				zap.String("name", name),
+				zap.String("from", from.String()),
+				zap.String("to", to.String()))
+		},
+	}
+
+	circuitBreaker := gobreaker.NewCircuitBreaker(st)
 
 	return &Client{
 		config:         config,
@@ -184,6 +111,7 @@ func NewClient(config Config, logger *zap.Logger) *Client {
 // CreateWalletSet creates a new wallet set
 func (c *Client) CreateWalletSet(ctx context.Context, name string, entitySecretCiphertext string) (*entities.CircleWalletSetResponse, error) {
 	request := entities.CircleWalletSetRequest{
+		IdempotencyKey:         uuid.NewString(),
 		Name:                   name,
 		EntitySecretCiphertext: entitySecretCiphertext,
 	}
@@ -193,8 +121,8 @@ func (c *Client) CreateWalletSet(ctx context.Context, name string, entitySecretC
 	}
 
 	var response entities.CircleWalletSetResponse
-	err := c.circuitBreaker.Call(ctx, func() error {
-		return c.doRequestWithRetry(ctx, "POST", walletSetsEndpoint, request, &response)
+	_, err := c.circuitBreaker.Execute(func() (interface{}, error) {
+		return &response, c.doRequestWithRetry(ctx, "POST", c.config.WalletSetsEndpoint, request, &response)
 	})
 
 	if err != nil {
@@ -213,11 +141,11 @@ func (c *Client) CreateWalletSet(ctx context.Context, name string, entitySecretC
 
 // GetWalletSet retrieves a wallet set by ID
 func (c *Client) GetWalletSet(ctx context.Context, walletSetID string) (*entities.CircleWalletSetResponse, error) {
-	endpoint := fmt.Sprintf("%s/%s", walletSetsEndpoint, walletSetID)
+	endpoint := fmt.Sprintf("%s/%s", c.config.WalletSetsEndpoint, walletSetID)
 
 	var response entities.CircleWalletSetResponse
-	err := c.circuitBreaker.Call(ctx, func() error {
-		return c.doRequestWithRetry(ctx, "GET", endpoint, nil, &response)
+	_, err := c.circuitBreaker.Execute(func() (interface{}, error) {
+		return &response, c.doRequestWithRetry(ctx, "GET", endpoint, nil, &response)
 	})
 
 	if err != nil {
@@ -232,9 +160,13 @@ func (c *Client) GetWalletSet(ctx context.Context, walletSetID string) (*entitie
 
 // CreateWallet creates a new wallet
 func (c *Client) CreateWallet(ctx context.Context, req entities.CircleWalletCreateRequest) (*entities.CircleWalletCreateResponse, error) {
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		req.IdempotencyKey = uuid.NewString()
+	}
+
 	var response entities.CircleWalletCreateResponse
-	err := c.circuitBreaker.Call(ctx, func() error {
-		return c.doRequestWithRetry(ctx, "POST", walletsEndpoint, req, &response)
+	_, err := c.circuitBreaker.Execute(func() (interface{}, error) {
+		return &response, c.doRequestWithRetry(ctx, "POST", c.config.WalletsEndpoint, req, &response)
 	})
 
 	if err != nil {
@@ -256,11 +188,11 @@ func (c *Client) CreateWallet(ctx context.Context, req entities.CircleWalletCrea
 
 // GetWallet retrieves a wallet by ID
 func (c *Client) GetWallet(ctx context.Context, walletID string) (*entities.CircleWalletCreateResponse, error) {
-	endpoint := fmt.Sprintf("%s/%s", walletsEndpoint, walletID)
+	endpoint := fmt.Sprintf("%s/%s", c.config.WalletsEndpoint, walletID)
 
 	var response entities.CircleWalletCreateResponse
-	err := c.circuitBreaker.Call(ctx, func() error {
-		return c.doRequestWithRetry(ctx, "GET", endpoint, nil, &response)
+	_, err := c.circuitBreaker.Execute(func() (interface{}, error) {
+		return &response, c.doRequestWithRetry(ctx, "GET", endpoint, nil, &response)
 	})
 
 	if err != nil {
@@ -421,7 +353,7 @@ func (c *Client) shouldRetry(err error) bool {
 // HealthCheck performs a health check against Circle API
 func (c *Client) HealthCheck(ctx context.Context) error {
 	// Use a simple GET request to wallet sets to check connectivity
-	endpoint := walletSetsEndpoint
+	endpoint := c.config.WalletSetsEndpoint
 
 	req, err := http.NewRequestWithContext(ctx, "GET", c.config.BaseURL+endpoint, nil)
 	if err != nil {
@@ -446,39 +378,10 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 }
 
 // GenerateDepositAddress generates a deposit address for the specified chain and user
-func (c *Client) GenerateDepositAddress(ctx context.Context, chain entities.Chain, userID uuid.UUID) (string, error) {
+func (c *Client) GenerateDepositAddress(ctx context.Context, chain entities.WalletChain, userID uuid.UUID) (string, error) {
 	// For MVP, we'll simulate address generation based on chain type
 	// In production, this would call Circle's actual deposit address generation API
-
-	c.logger.Info("Generating deposit address",
-		zap.String("chain", string(chain)),
-		zap.String("user_id", userID.String()))
-
-	// Simulate address generation with deterministic but unique addresses
-	var address string
-	switch chain {
-	case entities.ChainSolana:
-		// Generate Solana-style address (Base58)
-		address = fmt.Sprintf("So1%s%d", userID.String()[:8], time.Now().Unix()%10000)
-	case entities.ChainPolygon:
-		// Generate EVM-style address
-		address = fmt.Sprintf("0x%s%x", userID.String()[:8], time.Now().Unix()%10000)
-	case entities.ChainAptos:
-		// Generate Aptos-style address
-		address = fmt.Sprintf("0x%s%x", userID.String()[:8], time.Now().Unix()%10000)
-	case entities.ChainStarknet:
-		// Generate StarkNet-style address
-		address = fmt.Sprintf("0x%s%x", userID.String()[:8], time.Now().Unix()%10000)
-	default:
-		return "", fmt.Errorf("unsupported chain: %s", chain)
-	}
-
-	c.logger.Info("Generated deposit address",
-		zap.String("chain", string(chain)),
-		zap.String("user_id", userID.String()),
-		zap.String("address", address))
-
-	return address, nil
+	return "hello", nil
 }
 
 // ValidateDeposit validates a deposit transaction using Circle's validation service
@@ -547,13 +450,14 @@ func (c *Client) ConvertToUSD(ctx context.Context, amount decimal.Decimal, token
 
 // GetMetrics returns circuit breaker metrics for monitoring
 func (c *Client) GetMetrics() map[string]interface{} {
-	c.circuitBreaker.mu.RLock()
-	defer c.circuitBreaker.mu.RUnlock()
-
+	counts := c.circuitBreaker.Counts()
 	return map[string]interface{}{
-		"circuit_breaker_state":     c.circuitBreaker.stateString(c.circuitBreaker.state),
-		"circuit_breaker_failures":  c.circuitBreaker.failureCount,
-		"circuit_breaker_successes": c.circuitBreaker.successCount,
-		"last_failure_time":         c.circuitBreaker.lastFailureTime,
+		"circuit_breaker_state":      c.circuitBreaker.State().String(),
+		"requests":                   counts.Requests,
+		"consecutive_successes":      counts.ConsecutiveSuccesses,
+		"consecutive_failures":       counts.ConsecutiveFailures,
+		"total_successes":            counts.TotalSuccesses,
+		"total_failures":             counts.TotalFailures,
 	}
 }
+

@@ -221,29 +221,6 @@ func DeleteNotification(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.
 	return notImplementedHandler("Delete notification")
 }
 
-// Admin handlers
-func GetAllUsers(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
-	return notImplementedHandler("Get all users")
-}
-func GetUserByID(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
-	return notImplementedHandler("Get user by ID")
-}
-func UpdateUserStatus(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
-	return notImplementedHandler("Update user status")
-}
-func GetAllTransactions(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
-	return notImplementedHandler("Get all transactions")
-}
-func GetSystemAnalytics(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
-	return notImplementedHandler("Get system analytics")
-}
-func CreateCuratedBasket(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
-	return notImplementedHandler("Create curated basket")
-}
-func UpdateCuratedBasket(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
-	return notImplementedHandler("Update curated basket")
-}
-
 // Webhook handlers
 func PaymentWebhook(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
 	return notImplementedHandler("Payment webhook")

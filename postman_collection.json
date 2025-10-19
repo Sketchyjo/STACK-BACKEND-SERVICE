@@ -3822,6 +3822,60 @@
       "name": "Admin",
       "item": [
         {
+          "name": "Create Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"ChangeMe123!\",\n  \"firstName\": \"Ada\",\n  \"lastName\": \"Lovelace\",\n  \"role\": \"admin\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "Created",
+              "code": 201,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"{{user_id}}\",\n  \"email\": \"admin@example.com\",\n  \"role\": \"super_admin\",\n  \"isActive\": true,\n  \"onboardingStatus\": \"completed\",\n  \"kycStatus\": \"approved\",\n  \"createdAt\": \"2024-01-01T00:00:00Z\",\n  \"updatedAt\": \"2024-01-01T00:00:00Z\"\n}"
+            },
+            {
+              "name": "Failure",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"INVALID_REQUEST\",\n  \"message\": \"Invalid request payload\"\n}"
+            }
+          ]
+        },
+        {
           "name": "List Users",
           "request": {
             "method": "GET",
@@ -3855,7 +3909,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"users\": [\n      {\n        \"id\": \"{{user_id}}\",\n        \"role\": \"admin\"\n      }\n    ]\n  }\n}"
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"{{user_id}}\",\n      \"email\": \"user@example.com\",\n      \"role\": \"admin\",\n      \"isActive\": true,\n      \"onboardingStatus\": \"completed\",\n      \"kycStatus\": \"approved\"\n    }\n  ],\n  \"count\": 1\n}"
             },
             {
               "name": "Failure",
@@ -3867,7 +3921,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"error\",\n  \"error\": \"List Users failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+              "body": "{\n  \"error\": \"INVALID_ROLE\",\n  \"message\": \"Role must be user, admin, or super_admin\"\n}"
             }
           ]
         },
@@ -3906,7 +3960,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"user\": {\n      \"id\": \"{{user_id}}\",\n      \"status\": \"active\"\n    }\n  }\n}"
+              "body": "{\n  \"id\": \"{{user_id}}\",\n  \"email\": \"user@example.com\",\n  \"role\": \"admin\",\n  \"isActive\": true,\n  \"onboardingStatus\": \"completed\",\n  \"kycStatus\": \"approved\",\n  \"createdAt\": \"2024-01-01T00:00:00Z\",\n  \"updatedAt\": \"2024-01-01T00:00:00Z\"\n}"
             },
             {
               "name": "Failure",
@@ -3918,7 +3972,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Get User failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+              "body": "{\n  \"error\": \"NOT_FOUND\",\n  \"message\": \"User not found\"\n}"
             }
           ]
         },
@@ -3952,7 +4006,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"disabled\"\n}"
+              "raw": "{\n  \"isActive\": false\n}"
             }
           },
           "response": [
@@ -3966,7 +4020,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"message\": \"User status updated\"\n  }\n}"
+              "body": "{\n  \"id\": \"{{user_id}}\",\n  \"email\": \"user@example.com\",\n  \"role\": \"admin\",\n  \"isActive\": false,\n  \"onboardingStatus\": \"completed\",\n  \"kycStatus\": \"approved\",\n  \"updatedAt\": \"2024-01-01T00:00:00Z\"\n}"
             },
             {
               "name": "Failure",
@@ -3978,7 +4032,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Update User Status failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+              "body": "{\n  \"error\": \"NOT_FOUND\",\n  \"message\": \"User not found\"\n}"
             }
           ]
         },
@@ -4016,19 +4070,19 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"transactions\": [\n      {\n        \"id\": \"{{transaction_id}}\",\n        \"type\": \"deposit\"\n      }\n    ]\n  }\n}"
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"{{transaction_id}}\",\n      \"userId\": \"{{user_id}}\",\n      \"type\": \"deposit\",\n      \"amount\": \"100.00\",\n      \"status\": \"confirmed\",\n      \"metadata\": {\n        \"chain\": \"Aptos\",\n        \"txHash\": \"0xabc\",\n        \"token\": \"USDC\"\n      },\n      \"createdAt\": \"2024-01-01T00:00:00Z\"\n    }\n  ],\n  \"count\": 1\n}"
             },
             {
               "name": "Failure",
-              "status": "Bad Request",
-              "code": 400,
+              "status": "Internal Server Error",
+              "code": 500,
               "header": [
                 {
                   "key": "Content-Type",
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"error\",\n  \"error\": \"List All Transactions failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+              "body": "{\n  \"error\": \"INTERNAL_ERROR\",\n  \"message\": \"Failed to retrieve transactions\"\n}"
             }
           ]
         },
@@ -4067,19 +4121,19 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"active_users\": 1200,\n    \"volume\": \"500000.00\"\n  }\n}"
+              "body": "{\n  \"totalUsers\": 1280,\n  \"activeUsers\": 1024,\n  \"totalAdmins\": 4,\n  \"totalDeposits\": \"150000.00\",\n  \"pendingDeposits\": 3,\n  \"totalWallets\": 900,\n  \"generatedAt\": \"2024-01-01T00:00:00Z\"\n}"
             },
             {
               "name": "Failure",
-              "status": "Bad Request",
-              "code": 400,
+              "status": "Internal Server Error",
+              "code": 500,
               "header": [
                 {
                   "key": "Content-Type",
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"error\",\n  \"error\": \"System Analytics failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+              "body": "{\n  \"error\": \"INTERNAL_ERROR\",\n  \"message\": \"Failed to retrieve analytics\"\n}"
             }
           ]
         },
@@ -4112,7 +4166,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Yield\",\n  \"description\": \"Income basket\"\n}"
+              "raw": "{\n  \"name\": \"Yield\",\n  \"description\": \"Income basket\",\n  \"riskLevel\": \"balanced\",\n  \"composition\": [\n    {\n      \"symbol\": \"VTI\",\n      \"weight\": 0.6\n    },\n    {\n      \"symbol\": \"BND\",\n      \"weight\": 0.4\n    }\n  ]\n}"
             }
           },
           "response": [
@@ -4126,7 +4180,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"curated_basket_id\": \"{{curated_basket_id}}\"\n  }\n}"
+              "body": "{\n  \"id\": \"{{curated_basket_id}}\",\n  \"name\": \"Yield\",\n  \"description\": \"Income basket\",\n  \"riskLevel\": \"balanced\",\n  \"composition\": [\n    {\n      \"symbol\": \"VTI\",\n      \"weight\": \"0.60\"\n    },\n    {\n      \"symbol\": \"BND\",\n      \"weight\": \"0.40\"\n    }\n  ],\n  \"createdAt\": \"2024-01-01T00:00:00Z\",\n  \"updatedAt\": \"2024-01-01T00:00:00Z\"\n}"
             },
             {
               "name": "Failure",
@@ -4138,7 +4192,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Create Curated Basket failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+              "body": "{\n  \"error\": \"VALIDATION_FAILED\",\n  \"message\": \"composition weights must sum to 1.0\"\n}"
             }
           ]
         },
@@ -4172,7 +4226,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Yield\"\n}"
+              "raw": "{\n  \"name\": \"Updated Yield\",\n  \"description\": \"Refined allocation\",\n  \"riskLevel\": \"balanced\",\n  \"composition\": [\n    {\n      \"symbol\": \"VTI\",\n      \"weight\": 0.5\n    },\n    {\n      \"symbol\": \"BND\",\n      \"weight\": 0.5\n    }\n  ]\n}"
             }
           },
           "response": [
@@ -4186,7 +4240,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"message\": \"Curated basket updated\"\n  }\n}"
+              "body": "{\n  \"id\": \"{{curated_basket_id}}\",\n  \"name\": \"Updated Yield\",\n  \"description\": \"Refined allocation\",\n  \"riskLevel\": \"balanced\",\n  \"composition\": [\n    {\n      \"symbol\": \"VTI\",\n      \"weight\": \"0.50\"\n    },\n    {\n      \"symbol\": \"BND\",\n      \"weight\": \"0.50\"\n    }\n  ],\n  \"createdAt\": \"2024-01-01T00:00:00Z\",\n  \"updatedAt\": \"2024-02-01T00:00:00Z\"\n}"
             },
             {
               "name": "Failure",
@@ -4198,7 +4252,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Update Curated Basket failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+              "body": "{\n  \"error\": \"VALIDATION_FAILED\",\n  \"message\": \"composition weights must sum to 1.0\"\n}"
             }
           ]
         },

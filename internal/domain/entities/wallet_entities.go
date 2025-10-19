@@ -1,6 +1,7 @@
 package entities
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -358,6 +359,7 @@ type WalletProvisioningJobResponse struct {
 
 // CircleWalletSetRequest represents Circle wallet set creation request
 type CircleWalletSetRequest struct {
+	IdempotencyKey         string `json:"idempotencyKey,omitempty"`
 	Name                   string `json:"name"`
 	EntitySecretCiphertext string `json:"entitySecretCiphertext"`
 }
@@ -365,6 +367,30 @@ type CircleWalletSetRequest struct {
 // CircleWalletSetResponse represents Circle wallet set response
 type CircleWalletSetResponse struct {
 	WalletSet CircleWalletSetData `json:"walletSet"`
+}
+
+// UnmarshalJSON normalizes Circle wallet set responses that may wrap data
+func (r *CircleWalletSetResponse) UnmarshalJSON(data []byte) error {
+	type alias CircleWalletSetResponse
+	aux := struct {
+		Data      *alias               `json:"data"`
+		WalletSet *CircleWalletSetData `json:"walletSet"`
+	}{}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	switch {
+	case aux.Data != nil && aux.Data.WalletSet.ID != "":
+		r.WalletSet = aux.Data.WalletSet
+	case aux.WalletSet != nil && aux.WalletSet.ID != "":
+		r.WalletSet = *aux.WalletSet
+	default:
+		r.WalletSet = CircleWalletSetData{}
+	}
+
+	return nil
 }
 
 // CircleWalletSetData represents Circle wallet set data
@@ -378,6 +404,7 @@ type CircleWalletSetData struct {
 
 // CircleWalletCreateRequest represents Circle wallet creation request
 type CircleWalletCreateRequest struct {
+	IdempotencyKey         string   `json:"idempotencyKey,omitempty"`
 	WalletSetID            string   `json:"walletSetId"`
 	Blockchains            []string `json:"blockchains"`
 	AccountType            string   `json:"accountType"`
@@ -387,6 +414,30 @@ type CircleWalletCreateRequest struct {
 // CircleWalletCreateResponse represents Circle wallet creation response
 type CircleWalletCreateResponse struct {
 	Wallet CircleWalletData `json:"wallet"`
+}
+
+// UnmarshalJSON normalizes Circle wallet responses that may wrap data
+func (r *CircleWalletCreateResponse) UnmarshalJSON(data []byte) error {
+	type alias CircleWalletCreateResponse
+	aux := struct {
+		Data   *alias           `json:"data"`
+		Wallet CircleWalletData `json:"wallet"`
+	}{}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	switch {
+	case aux.Data != nil && aux.Data.Wallet.ID != "":
+		r.Wallet = aux.Data.Wallet
+	case aux.Wallet.ID != "":
+		r.Wallet = aux.Wallet
+	default:
+		r.Wallet = CircleWalletData{}
+	}
+
+	return nil
 }
 
 // CircleWalletData represents Circle wallet data
