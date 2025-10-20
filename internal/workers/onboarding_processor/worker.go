@@ -310,12 +310,12 @@ func (w *Worker) createWallets(ctx context.Context, job *entities.OnboardingJob,
 		}
 	}
 
-	// Default chains if not specified
+	// Default chains if not specified - use testnet for test API key compatibility
 	if len(chains) == 0 {
 		chains = []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainSOL,
-			entities.ChainAPTOS,
+			entities.ChainETHSepolia,
+			entities.ChainSOLDevnet,
+			entities.ChainAPTOSTestnet,
 		}
 	}
 

@@ -18,6 +18,7 @@ type Service struct {
 	provisioningJobRepo WalletProvisioningJobRepository
 	circleClient        CircleClient
 	auditService        AuditService
+	entitySecretService EntitySecretService
 	logger              *zap.Logger
 	config              Config
 }
@@ -72,6 +73,10 @@ type AuditService interface {
 	LogWalletEvent(ctx context.Context, userID uuid.UUID, action, entity string, before, after interface{}) error
 }
 
+type EntitySecretService interface {
+	GenerateEntitySecretCiphertext(ctx context.Context) (string, error)
+}
+
 // NewService creates a new wallet service
 func NewService(
 	walletRepo WalletRepository,
@@ -79,6 +84,7 @@ func NewService(
 	provisioningJobRepo WalletProvisioningJobRepository,
 	circleClient CircleClient,
 	auditService AuditService,
+	entitySecretService EntitySecretService,
 	logger *zap.Logger,
 	cfg Config,
 ) *Service {
@@ -97,6 +103,7 @@ func NewService(
 		provisioningJobRepo: provisioningJobRepo,
 		circleClient:        circleClient,
 		auditService:        auditService,
+		entitySecretService: entitySecretService,
 		logger:              logger,
 		config:              cfg,
 	}
@@ -104,11 +111,12 @@ func NewService(
 
 func normalizeSupportedChains(chains []entities.WalletChain, logger *zap.Logger) []entities.WalletChain {
 	if len(chains) == 0 {
+		// Use testnet chains for test API key compatibility
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainETHSepolia,
+			entities.ChainMATICAmoy,
+			entities.ChainSOLDevnet,
+			entities.ChainBASESepolia,
 		}
 	}
 
@@ -128,11 +136,12 @@ func normalizeSupportedChains(chains []entities.WalletChain, logger *zap.Logger)
 	}
 
 	if len(normalized) == 0 {
+		// Use testnet chains for test API key compatibility
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainETHSepolia,
+			entities.ChainMATICAmoy,
+			entities.ChainSOLDevnet,
+			entities.ChainBASESepolia,
 		}
 	}
 
@@ -506,14 +515,21 @@ func (s *Service) ensureWalletSet(ctx context.Context) (*entities.WalletSet, err
 		return nil, fmt.Errorf("failed to create Circle wallet set: %w", err)
 	}
 
+	// Generate entity secret ciphertext for the wallet set
+	entitySecretCiphertext, err := s.entitySecretService.GenerateEntitySecretCiphertext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate entity secret ciphertext: %w", err)
+	}
+
 	// Create wallet set record
 	walletSet = &entities.WalletSet{
-		ID:                uuid.New(),
-		Name:              setName,
-		CircleWalletSetID: circleResp.WalletSet.ID,
-		Status:            entities.WalletSetStatusActive,
-		CreatedAt:         time.Now(),
-		UpdatedAt:         time.Now(),
+		ID:                     uuid.New(),
+		Name:                   setName,
+		CircleWalletSetID:      circleResp.WalletSet.ID,
+		EntitySecretCiphertext: entitySecretCiphertext,
+		Status:                 entities.WalletSetStatusActive,
+		CreatedAt:              time.Now(),
+		UpdatedAt:              time.Now(),
 	}
 
 	if err := s.walletSetRepo.Create(ctx, walletSet); err != nil {
@@ -639,7 +655,7 @@ func (s *Service) HealthCheck(ctx context.Context) error {
 
 	// Check Circle client health
 	if err := s.circleClient.HealthCheck(ctx); err != nil {
-		return fmt.Errorf("Circle client health check failed: %w", err)
+		return fmt.Errorf("circle client health check failed: %w", err)
 	}
 
 	// Check if we can access the wallet set

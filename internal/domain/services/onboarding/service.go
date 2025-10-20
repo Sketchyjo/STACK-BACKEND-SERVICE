@@ -104,12 +104,12 @@ func NewService(
 
 func normalizeDefaultWalletChains(chains []entities.WalletChain, logger *zap.Logger) []entities.WalletChain {
 	if len(chains) == 0 {
-		logger.Warn("No default wallet chains configured; falling back to ETH/MATIC/SOL/BASE")
+		logger.Warn("No default wallet chains configured; falling back to ETH-SEPOLIA/MATIC-AMOY/SOL-DEVNET/BASE-SEPOLIA")
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainETHSepolia,
+			entities.ChainMATICAmoy,
+			entities.ChainSOLDevnet,
+			entities.ChainBASESepolia,
 		}
 	}
 
@@ -129,12 +129,12 @@ func normalizeDefaultWalletChains(chains []entities.WalletChain, logger *zap.Log
 	}
 
 	if len(normalized) == 0 {
-		logger.Warn("Configured wallet chains invalid; falling back to ETH/MATIC/SOL/BASE")
+		logger.Warn("Configured wallet chains invalid; falling back to ETH-SEPOLIA/MATIC-AMOY/SOL-DEVNET/BASE-SEPOLIA")
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainETHSepolia,
+			entities.ChainMATICAmoy,
+			entities.ChainSOLDevnet,
+			entities.ChainBASESepolia,
 		}
 	}
 

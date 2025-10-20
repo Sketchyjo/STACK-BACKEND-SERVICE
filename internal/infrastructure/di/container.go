@@ -12,6 +12,7 @@ import (
 	"github.com/stack-service/stack_service/internal/domain/entities"
 	domainrepos "github.com/stack-service/stack_service/internal/domain/repositories"
 	"github.com/stack-service/stack_service/internal/domain/services"
+	entitysecret "github.com/stack-service/stack_service/internal/domain/services/entity_secret"
 	"github.com/stack-service/stack_service/internal/domain/services/funding"
 	"github.com/stack-service/stack_service/internal/domain/services/investing"
 	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
@@ -106,6 +107,7 @@ type Container struct {
 	FundingService       *funding.Service
 	InvestingService     *investing.Service
 	AICfoService         *services.AICfoService
+	EntitySecretService  *entitysecret.Service
 
 	// ZeroG Services
 	InferenceGateway *zerog.InferenceGateway
@@ -214,6 +216,9 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 
 	auditService := adapters.NewAuditService(db, zapLog)
 
+	// Initialize entity secret service
+	entitySecretService := entitysecret.NewService(zapLog)
+
 	// Initialize ZeroG services
 	storageClient, err := zerog.NewStorageClient(&cfg.ZeroG.Storage, zapLog)
 	if err != nil {
@@ -258,6 +263,9 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 		InferenceGateway: inferenceGateway,
 		StorageClient:    storageClient,
 		NamespaceManager: namespaceManager,
+
+		// Entity Secret Service
+		EntitySecretService: entitySecretService,
 	}
 
 	// Initialize domain services with their dependencies
@@ -295,6 +303,7 @@ func (c *Container) initializeDomainServices() error {
 		c.WalletProvisioningJobRepo,
 		c.CircleClient,
 		c.AuditService,
+		c.EntitySecretService,
 		c.ZapLog,
 		walletServiceConfig,
 	)
@@ -423,12 +432,12 @@ func (c *Container) GetOnboardingJobService() *services.OnboardingJobService {
 
 func convertWalletChains(raw []string, logger *zap.Logger) []entities.WalletChain {
 	if len(raw) == 0 {
-		logger.Warn("circle.supported_chains not configured; defaulting to ETH/MATIC/SOL/BASE")
+		logger.Warn("circle.supported_chains not configured; defaulting to testnet chains for test API key compatibility")
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainETHSepolia,
+			entities.ChainMATICAmoy,
+			entities.ChainSOLDevnet,
+			entities.ChainBASESepolia,
 		}
 	}
 
@@ -452,12 +461,12 @@ func convertWalletChains(raw []string, logger *zap.Logger) []entities.WalletChai
 	}
 
 	if len(normalized) == 0 {
-		logger.Warn("circle.supported_chains contained no valid entries; defaulting to ETH/MATIC/SOL/BASE")
+		logger.Warn("circle.supported_chains contained no valid entries; defaulting to testnet chains for test API key compatibility")
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainETHSepolia,
+			entities.ChainMATICAmoy,
+			entities.ChainSOLDevnet,
+			entities.ChainBASESepolia,
 		}
 	}
 
