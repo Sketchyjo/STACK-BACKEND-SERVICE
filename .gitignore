@@ -118,6 +118,7 @@ dump.rdb
 # Application specific
 stack_service
 main
+app
 
 # Prometheus data
 prometheus_data/
