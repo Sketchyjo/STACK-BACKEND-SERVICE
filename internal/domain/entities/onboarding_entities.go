@@ -83,6 +83,7 @@ const (
 	StepRegistration       OnboardingStepType = "registration"
 	StepEmailVerification  OnboardingStepType = "email_verification"
 	StepPhoneVerification  OnboardingStepType = "phone_verification"
+	StepPasscodeCreation   OnboardingStepType = "passcode_creation"
 	StepKYCSubmission      OnboardingStepType = "kyc_submission"
 	StepKYCReview          OnboardingStepType = "kyc_review"
 	StepWalletCreation     OnboardingStepType = "wallet_creation"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,17 @@ import (
 
 	"github.com/stack-service/stack_service/internal/domain/entities"
 )
+
+// WalletListFilters represents filters for wallet listing
+type WalletListFilters struct {
+	UserID      *uuid.UUID                  `json:"user_id,omitempty"`
+	WalletSetID *uuid.UUID                  `json:"wallet_set_id,omitempty"`
+	Chain       *entities.WalletChain       `json:"chain,omitempty"`
+	AccountType *entities.WalletAccountType `json:"account_type,omitempty"`
+	Status      *entities.WalletStatus      `json:"status,omitempty"`
+	Limit       int                         `json:"limit"`
+	Offset      int                         `json:"offset"`
+}
 
 // WalletRepository implements the wallet repository interface using PostgreSQL
 type WalletRepository struct {
@@ -261,16 +273,15 @@ func NewWalletSetRepository(db *sql.DB, logger *zap.Logger) *WalletSetRepository
 func (r *WalletSetRepository) Create(ctx context.Context, walletSet *entities.WalletSet) error {
 	query := `
 		INSERT INTO wallet_sets (
-			id, name, circle_wallet_set_id, entity_secret_ciphertext, status, created_at, updated_at
+			id, name, circle_wallet_set_id, status, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7
+			$1, $2, $3, $4, $5, $6
 		)`
 
 	_, err := r.db.ExecContext(ctx, query,
 		walletSet.ID,
 		walletSet.Name,
 		walletSet.CircleWalletSetID,
-		walletSet.EntitySecretCiphertext,
 		string(walletSet.Status),
 		walletSet.CreatedAt,
 		walletSet.UpdatedAt,
@@ -288,7 +299,7 @@ func (r *WalletSetRepository) Create(ctx context.Context, walletSet *entities.Wa
 // GetByID retrieves a wallet set by ID
 func (r *WalletSetRepository) GetByID(ctx context.Context, id uuid.UUID) (*entities.WalletSet, error) {
 	query := `
-		SELECT id, name, circle_wallet_set_id, entity_secret_ciphertext, status, created_at, updated_at
+		SELECT id, name, circle_wallet_set_id, status, created_at, updated_at
 		FROM wallet_sets 
 		WHERE id = $1`
 
@@ -298,7 +309,6 @@ func (r *WalletSetRepository) GetByID(ctx context.Context, id uuid.UUID) (*entit
 		&walletSet.ID,
 		&walletSet.Name,
 		&walletSet.CircleWalletSetID,
-		&walletSet.EntitySecretCiphertext,
 		&walletSet.Status,
 		&walletSet.CreatedAt,
 		&walletSet.UpdatedAt,
@@ -318,7 +328,7 @@ func (r *WalletSetRepository) GetByID(ctx context.Context, id uuid.UUID) (*entit
 // GetByCircleWalletSetID retrieves a wallet set by Circle wallet set ID
 func (r *WalletSetRepository) GetByCircleWalletSetID(ctx context.Context, circleWalletSetID string) (*entities.WalletSet, error) {
 	query := `
-		SELECT id, name, circle_wallet_set_id, entity_secret_ciphertext, status, created_at, updated_at
+		SELECT id, name, circle_wallet_set_id, status, created_at, updated_at
 		FROM wallet_sets 
 		WHERE circle_wallet_set_id = $1`
 
@@ -328,7 +338,6 @@ func (r *WalletSetRepository) GetByCircleWalletSetID(ctx context.Context, circle
 		&walletSet.ID,
 		&walletSet.Name,
 		&walletSet.CircleWalletSetID,
-		&walletSet.EntitySecretCiphertext,
 		&walletSet.Status,
 		&walletSet.CreatedAt,
 		&walletSet.UpdatedAt,
@@ -349,7 +358,7 @@ func (r *WalletSetRepository) GetByCircleWalletSetID(ctx context.Context, circle
 // GetActive retrieves the currently active wallet set
 func (r *WalletSetRepository) GetActive(ctx context.Context) (*entities.WalletSet, error) {
 	query := `
-		SELECT id, name, circle_wallet_set_id, entity_secret_ciphertext, status, created_at, updated_at
+		SELECT id, name, circle_wallet_set_id, status, created_at, updated_at
 		FROM wallet_sets 
 		WHERE status = $1
 		ORDER BY created_at DESC
@@ -361,7 +370,6 @@ func (r *WalletSetRepository) GetActive(ctx context.Context) (*entities.WalletSe
 		&walletSet.ID,
 		&walletSet.Name,
 		&walletSet.CircleWalletSetID,
-		&walletSet.EntitySecretCiphertext,
 		&walletSet.Status,
 		&walletSet.CreatedAt,
 		&walletSet.UpdatedAt,
@@ -382,14 +390,13 @@ func (r *WalletSetRepository) GetActive(ctx context.Context) (*entities.WalletSe
 func (r *WalletSetRepository) Update(ctx context.Context, walletSet *entities.WalletSet) error {
 	query := `
 		UPDATE wallet_sets SET 
-			name = $2, circle_wallet_set_id = $3, entity_secret_ciphertext = $4, status = $5, updated_at = $6
+			name = $2, circle_wallet_set_id = $3, status = $4, updated_at = $5
 		WHERE id = $1`
 
 	_, err := r.db.ExecContext(ctx, query,
 		walletSet.ID,
 		walletSet.Name,
 		walletSet.CircleWalletSetID,
-		walletSet.EntitySecretCiphertext,
 		string(walletSet.Status),
 		time.Now(),
 	)
@@ -401,4 +408,197 @@ func (r *WalletSetRepository) Update(ctx context.Context, walletSet *entities.Wa
 
 	r.logger.Debug("Wallet set updated successfully", zap.String("wallet_set_id", walletSet.ID.String()))
 	return nil
+}
+
+// GetByUserIDAndAccountType retrieves wallets by user ID and account type
+func (r *WalletRepository) GetByUserIDAndAccountType(ctx context.Context, userID uuid.UUID, accountType entities.WalletAccountType) ([]*entities.ManagedWallet, error) {
+	query := `
+		SELECT id, user_id, wallet_set_id, circle_wallet_id, chain, address, account_type, status, created_at, updated_at
+		FROM managed_wallets 
+		WHERE user_id = $1 AND account_type = $2
+		ORDER BY created_at ASC`
+
+	rows, err := r.db.QueryContext(ctx, query, userID, string(accountType))
+	if err != nil {
+		r.logger.Error("Failed to get wallets by user and account type", zap.Error(err),
+			zap.String("user_id", userID.String()),
+			zap.String("account_type", string(accountType)))
+		return nil, fmt.Errorf("failed to get wallets: %w", err)
+	}
+	defer rows.Close()
+
+	var wallets []*entities.ManagedWallet
+	for rows.Next() {
+		wallet := &entities.ManagedWallet{}
+		err := rows.Scan(
+			&wallet.ID,
+			&wallet.UserID,
+			&wallet.WalletSetID,
+			&wallet.CircleWalletID,
+			&wallet.Chain,
+			&wallet.Address,
+			&wallet.AccountType,
+			&wallet.Status,
+			&wallet.CreatedAt,
+			&wallet.UpdatedAt,
+		)
+		if err != nil {
+			r.logger.Error("Failed to scan wallet", zap.Error(err))
+			return nil, fmt.Errorf("failed to scan wallet: %w", err)
+		}
+		wallets = append(wallets, wallet)
+	}
+
+	return wallets, nil
+}
+
+// ListWithFilters retrieves wallets with pagination and filters for admin queries
+func (r *WalletRepository) ListWithFilters(ctx context.Context, filters WalletListFilters) ([]*entities.ManagedWallet, int64, error) {
+	var conditions []string
+	var args []interface{}
+	argIndex := 1
+
+	// Build WHERE conditions
+	if filters.UserID != nil {
+		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argIndex))
+		args = append(args, *filters.UserID)
+		argIndex++
+	}
+
+	if filters.WalletSetID != nil {
+		conditions = append(conditions, fmt.Sprintf("wallet_set_id = $%d", argIndex))
+		args = append(args, *filters.WalletSetID)
+		argIndex++
+	}
+
+	if filters.Chain != nil {
+		conditions = append(conditions, fmt.Sprintf("chain = $%d", argIndex))
+		args = append(args, string(*filters.Chain))
+		argIndex++
+	}
+
+	if filters.AccountType != nil {
+		conditions = append(conditions, fmt.Sprintf("account_type = $%d", argIndex))
+		args = append(args, string(*filters.AccountType))
+		argIndex++
+	}
+
+	if filters.Status != nil {
+		conditions = append(conditions, fmt.Sprintf("status = $%d", argIndex))
+		args = append(args, string(*filters.Status))
+		argIndex++
+	}
+
+	// Build query
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Count query
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM managed_wallets %s", whereClause)
+	var totalCount int64
+	err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount)
+	if err != nil {
+		r.logger.Error("Failed to count wallets", zap.Error(err))
+		return nil, 0, fmt.Errorf("failed to count wallets: %w", err)
+	}
+
+	// Data query with pagination
+	query := fmt.Sprintf(`
+		SELECT id, user_id, wallet_set_id, circle_wallet_id, chain, address, account_type, status, created_at, updated_at
+		FROM managed_wallets 
+		%s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d`, whereClause, argIndex, argIndex+1)
+
+	// Add pagination args
+	args = append(args, filters.Limit, filters.Offset)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		r.logger.Error("Failed to list wallets with filters", zap.Error(err))
+		return nil, 0, fmt.Errorf("failed to list wallets: %w", err)
+	}
+	defer rows.Close()
+
+	var wallets []*entities.ManagedWallet
+	for rows.Next() {
+		wallet := &entities.ManagedWallet{}
+		err := rows.Scan(
+			&wallet.ID,
+			&wallet.UserID,
+			&wallet.WalletSetID,
+			&wallet.CircleWalletID,
+			&wallet.Chain,
+			&wallet.Address,
+			&wallet.AccountType,
+			&wallet.Status,
+			&wallet.CreatedAt,
+			&wallet.UpdatedAt,
+		)
+		if err != nil {
+			r.logger.Error("Failed to scan wallet", zap.Error(err))
+			return nil, 0, fmt.Errorf("failed to scan wallet: %w", err)
+		}
+		wallets = append(wallets, wallet)
+	}
+
+	return wallets, totalCount, nil
+}
+
+// GetWalletsByWalletSetID retrieves all wallets in a wallet set
+func (r *WalletRepository) GetWalletsByWalletSetID(ctx context.Context, walletSetID uuid.UUID) ([]*entities.ManagedWallet, error) {
+	query := `
+		SELECT id, user_id, wallet_set_id, circle_wallet_id, chain, address, account_type, status, created_at, updated_at
+		FROM managed_wallets 
+		WHERE wallet_set_id = $1
+		ORDER BY created_at ASC`
+
+	rows, err := r.db.QueryContext(ctx, query, walletSetID)
+	if err != nil {
+		r.logger.Error("Failed to get wallets by wallet set ID", zap.Error(err),
+			zap.String("wallet_set_id", walletSetID.String()))
+		return nil, fmt.Errorf("failed to get wallets: %w", err)
+	}
+	defer rows.Close()
+
+	var wallets []*entities.ManagedWallet
+	for rows.Next() {
+		wallet := &entities.ManagedWallet{}
+		err := rows.Scan(
+			&wallet.ID,
+			&wallet.UserID,
+			&wallet.WalletSetID,
+			&wallet.CircleWalletID,
+			&wallet.Chain,
+			&wallet.Address,
+			&wallet.AccountType,
+			&wallet.Status,
+			&wallet.CreatedAt,
+			&wallet.UpdatedAt,
+		)
+		if err != nil {
+			r.logger.Error("Failed to scan wallet", zap.Error(err))
+			return nil, fmt.Errorf("failed to scan wallet: %w", err)
+		}
+		wallets = append(wallets, wallet)
+	}
+
+	return wallets, nil
+}
+
+// CountByStatus counts wallets by status
+func (r *WalletRepository) CountByStatus(ctx context.Context, status entities.WalletStatus) (int64, error) {
+	query := `SELECT COUNT(*) FROM managed_wallets WHERE status = $1`
+
+	var count int64
+	err := r.db.QueryRowContext(ctx, query, string(status)).Scan(&count)
+	if err != nil {
+		r.logger.Error("Failed to count wallets by status", zap.Error(err),
+			zap.String("status", string(status)))
+		return 0, fmt.Errorf("failed to count wallets: %w", err)
+	}
+
+	return count, nil
 }

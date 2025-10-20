@@ -6,6 +6,39 @@ import (
 	"github.com/google/uuid"
 )
 
+// CreateWalletSetRequest represents request to create a wallet set
+type CreateWalletSetRequest struct {
+	Name              string `json:"name" validate:"required"`
+	CircleWalletSetID string `json:"circle_wallet_set_id,omitempty"`
+}
+
+// WalletSetsListResponse represents response for wallet sets listing
+type WalletSetsListResponse struct {
+	Items []WalletSet `json:"items"`
+	Count int         `json:"count"`
+}
+
+// WalletSetDetailResponse represents detailed wallet set response
+type WalletSetDetailResponse struct {
+	WalletSet WalletSet       `json:"wallet_set"`
+	Wallets   []ManagedWallet `json:"wallets,omitempty"`
+	Stats     WalletSetStats  `json:"stats,omitempty"`
+}
+
+// WalletSetStats represents statistics for a wallet set
+type WalletSetStats struct {
+	TotalWallets    int64 `json:"total_wallets"`
+	LiveWallets     int64 `json:"live_wallets"`
+	CreatingWallets int64 `json:"creating_wallets"`
+	FailedWallets   int64 `json:"failed_wallets"`
+}
+
+// AdminWalletsListResponse represents response for admin wallets listing
+type AdminWalletsListResponse struct {
+	Items []ManagedWallet `json:"items"`
+	Count int             `json:"count"`
+}
+
 // AdminRole represents the role assigned to privileged users
 type AdminRole string
 

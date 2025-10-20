@@ -43,12 +43,14 @@ Backend Design Notes (Circle Wallets integration)
 Goal: Create wallets immediately after KYC approval using Circle Programmable Wallets (developer-controlled) so users can transact without seed phrases.
 
 1) Wallet Set (one per tenant/app)
-	•	POST https://api-sandbox.circle.com/v1/w3s/developer/walletSets → create/set if missing.
+	•	POST 
+https://api.circle.com/v1/w3s/developer/walletSets → create/set if missing.
 	•	Stores walletSetId used for all user wallets.
 	•	Enables Unified Wallet Addressing across EVM chains (same address on L1/L2 where supported).  ￼
 
 2) Create Wallets per User (after KYC pass)
-	•	POST https://api-sandbox.circle.com/v1/w3s/developer/wallets with body:
+	•	POST 
+https://api.circle.com/v1/w3s/developer/wallets with body:
 	•	walletSetId, blockchains: ["ETH-SEPOLIA" (staging) | "ETH", ... EVMs, "SOL" | "SOL-DEVNET", "APTOS" | "APTOS-TESTNET"]
 	•	accountType: "EOA" for Solana and Aptos (SCA not supported on these).
 	•	entitySecretCiphertext (required by Circle).  ￼

@@ -274,7 +274,7 @@ func (s *Service) GetOnboardingStatus(ctx context.Context, userID uuid.UUID) (*e
 
 // CompleteEmailVerification marks email verification as finished and advances onboarding without requiring KYC
 func (s *Service) CompleteEmailVerification(ctx context.Context, userID uuid.UUID) error {
-	user, err := s.userRepo.GetByID(ctx, userID)
+	_, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get user: %w", err)
 	}
@@ -286,22 +286,8 @@ func (s *Service) CompleteEmailVerification(ctx context.Context, userID uuid.UUI
 		s.logger.Warn("Failed to mark email verification step as completed", zap.Error(err), zap.String("userId", userID.String()))
 	}
 
-	// Transition to wallet provisioning if not already pending or completed
-	switch user.OnboardingStatus {
-	case entities.OnboardingStatusWalletsPending, entities.OnboardingStatusCompleted:
-		// Nothing to do, wallet provisioning already in progress or done
-	default:
-		if err := s.userRepo.UpdateOnboardingStatus(ctx, userID, entities.OnboardingStatusWalletsPending); err != nil {
-			return fmt.Errorf("failed to update onboarding status: %w", err)
-		}
-	}
-
-	// Kick off wallet provisioning without blocking the verification response
-	if err := s.walletService.CreateWalletsForUser(ctx, userID, s.defaultWalletChains); err != nil {
-		s.logger.Warn("Failed to enqueue wallet provisioning after email verification",
-			zap.Error(err),
-			zap.String("userId", userID.String()))
-	}
+	// Don't trigger wallet creation yet - wait for passcode creation
+	// Just mark email verification as completed
 
 	if err := s.auditService.LogOnboardingEvent(ctx, userID, "email_verified", "user", nil, map[string]any{
 		"verified_at": now,
@@ -309,6 +295,45 @@ func (s *Service) CompleteEmailVerification(ctx context.Context, userID uuid.UUI
 		s.logger.Warn("Failed to log email verification event", zap.Error(err))
 	}
 
+	return nil
+}
+
+// CompletePasscodeCreation handles passcode creation completion and triggers wallet creation
+func (s *Service) CompletePasscodeCreation(ctx context.Context, userID uuid.UUID) error {
+	s.logger.Info("Processing passcode creation completion", zap.String("userId", userID.String()))
+
+	_, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// Mark passcode creation step as completed
+	if err := s.markStepCompleted(ctx, userID, entities.StepPasscodeCreation, map[string]any{
+		"completed_at": time.Now(),
+	}); err != nil {
+		s.logger.Warn("Failed to mark passcode creation step as completed", zap.Error(err))
+	}
+
+	// Transition to wallet provisioning
+	if err := s.userRepo.UpdateOnboardingStatus(ctx, userID, entities.OnboardingStatusWalletsPending); err != nil {
+		return fmt.Errorf("failed to update onboarding status: %w", err)
+	}
+
+	// Kick off wallet provisioning after passcode creation
+	if err := s.walletService.CreateWalletsForUser(ctx, userID, s.defaultWalletChains); err != nil {
+		s.logger.Warn("Failed to enqueue wallet provisioning after passcode creation",
+			zap.Error(err),
+			zap.String("userId", userID.String()))
+	}
+
+	// Log audit event
+	if err := s.auditService.LogOnboardingEvent(ctx, userID, "passcode_created", "user", nil, map[string]any{
+		"created_at": time.Now(),
+	}); err != nil {
+		s.logger.Warn("Failed to log passcode creation event", zap.Error(err))
+	}
+
+	s.logger.Info("Passcode creation completed and wallet provisioning initiated", zap.String("userId", userID.String()))
 	return nil
 }
 
@@ -573,6 +598,7 @@ func (s *Service) createInitialOnboardingSteps(ctx context.Context, userID uuid.
 	steps := []entities.OnboardingStepType{
 		entities.StepRegistration,
 		entities.StepEmailVerification,
+		entities.StepPasscodeCreation,
 		entities.StepKYCSubmission,
 		entities.StepKYCReview,
 		entities.StepWalletCreation,
@@ -620,6 +646,14 @@ func (s *Service) normalizeCompletedSteps(user *entities.UserProfile, steps []en
 		completed[entities.StepEmailVerification] = true
 	}
 
+	// Check if passcode is created by checking if user has a passcode hash
+	// This would need to be implemented in the user repository
+	// For now, we'll assume it's completed if onboarding status is wallets_pending or completed
+	if user.OnboardingStatus == entities.OnboardingStatusWalletsPending ||
+		user.OnboardingStatus == entities.OnboardingStatusCompleted {
+		completed[entities.StepPasscodeCreation] = true
+	}
+
 	kycStatus := entities.KYCStatus(user.KYCStatus)
 	if user.KYCSubmittedAt != nil ||
 		kycStatus == entities.KYCStatusProcessing ||
@@ -639,6 +673,7 @@ func (s *Service) normalizeCompletedSteps(user *entities.UserProfile, steps []en
 	canonical := []entities.OnboardingStepType{
 		entities.StepRegistration,
 		entities.StepEmailVerification,
+		entities.StepPasscodeCreation,
 		entities.StepKYCSubmission,
 		entities.StepKYCReview,
 		entities.StepWalletCreation,
@@ -670,7 +705,21 @@ func (s *Service) normalizeCompletedSteps(user *entities.UserProfile, steps []en
 func (s *Service) markStepCompleted(ctx context.Context, userID uuid.UUID, step entities.OnboardingStepType, data map[string]any) error {
 	flow, err := s.onboardingFlowRepo.GetByUserAndStep(ctx, userID, step)
 	if err != nil {
-		return fmt.Errorf("failed to get onboarding flow step: %w", err)
+		// If onboarding flow doesn't exist, create initial steps and try again
+		s.logger.Warn("Onboarding flow not found, creating initial steps",
+			zap.Error(err),
+			zap.String("userId", userID.String()),
+			zap.String("step", string(step)))
+		
+		if createErr := s.createInitialOnboardingSteps(ctx, userID); createErr != nil {
+			return fmt.Errorf("failed to create initial onboarding steps: %w", createErr)
+		}
+		
+		// Retry getting the flow
+		flow, err = s.onboardingFlowRepo.GetByUserAndStep(ctx, userID, step)
+		if err != nil {
+			return fmt.Errorf("failed to get onboarding flow step after creation: %w", err)
+		}
 	}
 
 	flow.MarkCompleted(data)

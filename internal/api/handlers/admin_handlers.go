@@ -880,3 +880,375 @@ func max(a, b int) int {
 	}
 	return b
 }
+
+// CreateWalletSet handles POST /api/v1/admin/wallet-sets
+// @Summary Create wallet set
+// @Description Creates a new Circle wallet set for managing user wallets
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param request body entities.CreateWalletSetRequest true "Wallet set creation request"
+// @Success 201 {object} entities.WalletSet
+// @Failure 400 {object} entities.ErrorResponse
+// @Failure 500 {object} entities.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/admin/wallet-sets [post]
+func CreateWalletSet(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
+	handler := newAdminHandler(db, cfg, log)
+	return handler.createWalletSet
+}
+
+// GetWalletSets handles GET /api/v1/admin/wallet-sets
+// @Summary List wallet sets
+// @Description Returns a list of all wallet sets with optional pagination
+// @Tags admin
+// @Produce json
+// @Param limit query int false "Number of items per page" default(50)
+// @Param offset query int false "Number of items to skip" default(0)
+// @Success 200 {object} entities.WalletSetsListResponse
+// @Failure 500 {object} entities.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/admin/wallet-sets [get]
+func GetWalletSets(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
+	handler := newAdminHandler(db, cfg, log)
+	return handler.getWalletSets
+}
+
+// GetWalletSetByID handles GET /api/v1/admin/wallet-sets/:id
+// @Summary Get wallet set by ID
+// @Description Returns wallet set details by ID
+// @Tags admin
+// @Produce json
+// @Param id path string true "Wallet Set ID"
+// @Success 200 {object} entities.WalletSetDetailResponse
+// @Failure 400 {object} entities.ErrorResponse
+// @Failure 404 {object} entities.ErrorResponse
+// @Failure 500 {object} entities.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/admin/wallet-sets/{id} [get]
+func GetWalletSetByID(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
+	handler := newAdminHandler(db, cfg, log)
+	return handler.getWalletSetByID
+}
+
+// GetAdminWallets handles GET /api/v1/admin/wallets
+// @Summary List all wallets (admin)
+// @Description Returns a list of all user wallets with optional filters
+// @Tags admin
+// @Produce json
+// @Param limit query int false "Number of items per page" default(50)
+// @Param offset query int false "Number of items to skip" default(0)
+// @Param user_id query string false "Filter by user ID"
+// @Param chain query string false "Filter by blockchain chain"
+// @Param account_type query string false "Filter by account type" Enums(EOA,SCA)
+// @Param status query string false "Filter by wallet status" Enums(creating,live,failed)
+// @Success 200 {object} entities.AdminWalletsListResponse
+// @Failure 500 {object} entities.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/admin/wallets [get]
+func GetAdminWallets(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.HandlerFunc {
+	handler := newAdminHandler(db, cfg, log)
+	return handler.getAdminWallets
+}
+
+func (h *adminHandler) createWalletSet(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	var req entities.CreateWalletSetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.log.Warnw("invalid create wallet set payload", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "INVALID_REQUEST",
+			"message": "Invalid request payload",
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "MISSING_NAME",
+			"message": "Wallet set name is required",
+		})
+		return
+	}
+
+	// Entity secret is now generated dynamically, no validation needed
+
+	// Create wallet set in database
+	walletSetID := uuid.New()
+	now := time.Now().UTC()
+
+	query := `
+		INSERT INTO wallet_sets (
+			id, name, circle_wallet_set_id, status, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6
+		)
+		RETURNING id, name, circle_wallet_set_id, status, created_at, updated_at`
+
+	var walletSet entities.WalletSet
+	err := h.db.QueryRowContext(ctx, query,
+		walletSetID,
+		req.Name,
+		req.CircleWalletSetID, // This would be empty for new sets
+		string(entities.WalletSetStatusActive),
+		now,
+		now,
+	).Scan(
+		&walletSet.ID,
+		&walletSet.Name,
+		&walletSet.CircleWalletSetID,
+		&walletSet.Status,
+		&walletSet.CreatedAt,
+		&walletSet.UpdatedAt,
+	)
+
+	if err != nil {
+		h.log.Errorw("failed to create wallet set", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "CREATE_FAILED",
+			"message": "Failed to create wallet set",
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, walletSet)
+}
+
+func (h *adminHandler) getWalletSets(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	limit := 50
+	if v := strings.TrimSpace(c.DefaultQuery("limit", "50")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 200 {
+			limit = parsed
+		}
+	}
+
+	offset := 0
+	if v := strings.TrimSpace(c.Query("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	query := `
+		SELECT id, name, circle_wallet_set_id, status, created_at, updated_at
+		FROM wallet_sets
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2`
+
+	rows, err := h.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		h.log.Errorw("failed to list wallet sets", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "INTERNAL_ERROR",
+			"message": "Failed to retrieve wallet sets",
+		})
+		return
+	}
+	defer rows.Close()
+
+	var walletSets []entities.WalletSet
+	for rows.Next() {
+		var walletSet entities.WalletSet
+		if err := rows.Scan(
+			&walletSet.ID,
+			&walletSet.Name,
+			&walletSet.CircleWalletSetID,
+			&walletSet.Status,
+			&walletSet.CreatedAt,
+			&walletSet.UpdatedAt,
+		); err != nil {
+			h.log.Errorw("failed to scan wallet set", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "INTERNAL_ERROR",
+				"message": "Failed to parse wallet set record",
+			})
+			return
+		}
+		walletSets = append(walletSets, walletSet)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"items": walletSets,
+		"count": len(walletSets),
+	})
+}
+
+func (h *adminHandler) getWalletSetByID(c *gin.Context) {
+	walletSetIDParam := c.Param("id")
+	walletSetID, err := uuid.Parse(walletSetIDParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "INVALID_ID",
+			"message": "Invalid wallet set ID",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT id, name, circle_wallet_set_id, status, created_at, updated_at
+		FROM wallet_sets
+		WHERE id = $1`
+
+	var walletSet entities.WalletSet
+	err = h.db.QueryRowContext(ctx, query, walletSetID).Scan(
+		&walletSet.ID,
+		&walletSet.Name,
+		&walletSet.CircleWalletSetID,
+		&walletSet.Status,
+		&walletSet.CreatedAt,
+		&walletSet.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":   "NOT_FOUND",
+				"message": "Wallet set not found",
+			})
+			return
+		}
+		h.log.Errorw("failed to get wallet set by id", "error", err, "wallet_set_id", walletSetID)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "INTERNAL_ERROR",
+			"message": "Failed to retrieve wallet set",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, walletSet)
+}
+
+func (h *adminHandler) getAdminWallets(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	limit := 50
+	if v := strings.TrimSpace(c.DefaultQuery("limit", "50")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 200 {
+			limit = parsed
+		}
+	}
+
+	offset := 0
+	if v := strings.TrimSpace(c.Query("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	var conditions []string
+	var args []interface{}
+	argIndex := 1
+
+	// Add filters
+	if userIDParam := strings.TrimSpace(c.Query("user_id")); userIDParam != "" {
+		userID, err := uuid.Parse(userIDParam)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "INVALID_USER_ID",
+				"message": "Invalid user ID format",
+			})
+			return
+		}
+		args = append(args, userID)
+		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argIndex))
+		argIndex++
+	}
+
+	if chainParam := strings.TrimSpace(c.Query("chain")); chainParam != "" {
+		args = append(args, chainParam)
+		conditions = append(conditions, fmt.Sprintf("chain = $%d", argIndex))
+		argIndex++
+	}
+
+	if accountTypeParam := strings.TrimSpace(c.Query("account_type")); accountTypeParam != "" {
+		if accountTypeParam != "EOA" && accountTypeParam != "SCA" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "INVALID_ACCOUNT_TYPE",
+				"message": "Account type must be EOA or SCA",
+			})
+			return
+		}
+		args = append(args, accountTypeParam)
+		conditions = append(conditions, fmt.Sprintf("account_type = $%d", argIndex))
+		argIndex++
+	}
+
+	if statusParam := strings.TrimSpace(c.Query("status")); statusParam != "" {
+		if statusParam != "creating" && statusParam != "live" && statusParam != "failed" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "INVALID_STATUS",
+				"message": "Status must be creating, live, or failed",
+			})
+			return
+		}
+		args = append(args, statusParam)
+		conditions = append(conditions, fmt.Sprintf("status = $%d", argIndex))
+		argIndex++
+	}
+
+	queryBuilder := strings.Builder{}
+	queryBuilder.WriteString(`
+		SELECT id, user_id, wallet_set_id, circle_wallet_id, chain, address, account_type, status, created_at, updated_at
+		FROM managed_wallets`)
+
+	if len(conditions) > 0 {
+		queryBuilder.WriteString(" WHERE ")
+		queryBuilder.WriteString(strings.Join(conditions, " AND "))
+	}
+
+	queryBuilder.WriteString(" ORDER BY created_at DESC")
+	queryBuilder.WriteString(fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIndex, argIndex+1))
+
+	args = append(args, limit, offset)
+
+	rows, err := h.db.QueryContext(ctx, queryBuilder.String(), args...)
+	if err != nil {
+		h.log.Errorw("failed to list wallets", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "INTERNAL_ERROR",
+			"message": "Failed to retrieve wallets",
+		})
+		return
+	}
+	defer rows.Close()
+
+	var wallets []entities.ManagedWallet
+	for rows.Next() {
+		var wallet entities.ManagedWallet
+		if err := rows.Scan(
+			&wallet.ID,
+			&wallet.UserID,
+			&wallet.WalletSetID,
+			&wallet.CircleWalletID,
+			&wallet.Chain,
+			&wallet.Address,
+			&wallet.AccountType,
+			&wallet.Status,
+			&wallet.CreatedAt,
+			&wallet.UpdatedAt,
+		); err != nil {
+			h.log.Errorw("failed to scan wallet", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "INTERNAL_ERROR",
+				"message": "Failed to parse wallet record",
+			})
+			return
+		}
+		wallets = append(wallets, wallet)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"items": wallets,
+		"count": len(wallets),
+	})
+}

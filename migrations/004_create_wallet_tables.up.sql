@@ -10,16 +10,19 @@ CREATE TABLE IF NOT EXISTS wallet_sets (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create managed_wallets table for tracking user wallets
+-- Create managed_wallets table for tracking developer-controlled user wallets
 CREATE TABLE IF NOT EXISTS managed_wallets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     wallet_set_id UUID NOT NULL REFERENCES wallet_sets(id) ON DELETE RESTRICT,
-    circle_wallet_id VARCHAR(255) UNIQUE NOT NULL,
+    circle_wallet_id VARCHAR(255) UNIQUE NOT NULL, -- Circle wallet ID for transaction operations
     chain VARCHAR(50) NOT NULL CHECK (
-        chain IN ('ETH', 'ETH-SEPOLIA', 'SOL', 'SOL-DEVNET', 'APTOS', 'APTOS-TESTNET')
+        chain IN ('ETH', 'ETH-SEPOLIA', 'MATIC', 'MATIC-AMOY', 'SOL', 'SOL-DEVNET', 'APTOS', 'APTOS-TESTNET', 'AVAX', 'BASE', 'BASE-SEPOLIA')
     ),
     address VARCHAR(255) NOT NULL,
+    account_type VARCHAR(10) DEFAULT 'EOA' CHECK (
+        account_type IN ('EOA', 'SCA')
+    ),
     status VARCHAR(50) DEFAULT 'creating' CHECK (
         status IN ('creating', 'live', 'failed')
     ),

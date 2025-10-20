@@ -121,13 +121,13 @@ type SecurityConfig struct {
 }
 
 type CircleConfig struct {
-	APIKey                 string   `mapstructure:"api_key"`
-	Environment            string   `mapstructure:"environment"` // sandbox or production
-	BaseURL                string   `mapstructure:"base_url"`
-	EntitySecretCiphertext string   `mapstructure:"entity_secret_ciphertext"`
-	DefaultWalletSetID     string   `mapstructure:"default_wallet_set_id"`
-	DefaultWalletSetName   string   `mapstructure:"default_wallet_set_name"`
-	SupportedChains        []string `mapstructure:"supported_chains"`
+	APIKey                     string   `mapstructure:"api_key"`
+	Environment                string   `mapstructure:"environment"` // sandbox or production
+	BaseURL                    string   `mapstructure:"base_url"`
+	EntitySecretCiphertext     string   `mapstructure:"entity_secret_ciphertext"` // Pre-registered ciphertext from Circle Dashboard
+	DefaultWalletSetID         string   `mapstructure:"default_wallet_set_id"`
+	DefaultWalletSetName       string   `mapstructure:"default_wallet_set_name"`
+	SupportedChains            []string `mapstructure:"supported_chains"`
 }
 
 type KYCConfig struct {
@@ -317,7 +317,6 @@ func setDefaults() {
 	viper.SetDefault("circle.environment", "sandbox")
 	viper.SetDefault("circle.api_key", "")
 	viper.SetDefault("circle.base_url", "")
-	viper.SetDefault("circle.entity_secret_ciphertext", "")
 	viper.SetDefault("circle.default_wallet_set_id", "")
 	viper.SetDefault("circle.default_wallet_set_name", "STACK-WalletSet")
 	viper.SetDefault("circle.supported_chains", []string{"ETH", "MATIC", "SOL", "BASE"})
@@ -411,8 +410,9 @@ func overrideFromEnv() {
 	if circleBaseURL := os.Getenv("CIRCLE_BASE_URL"); circleBaseURL != "" {
 		viper.Set("circle.base_url", circleBaseURL)
 	}
-	if circleEntitySecret := os.Getenv("CIRCLE_ENTITY_SECRET_CIPHERTEXT"); circleEntitySecret != "" {
-		viper.Set("circle.entity_secret_ciphertext", circleEntitySecret)
+	// Load pre-registered entity secret ciphertext from environment
+	if circleEntitySecretCiphertext := os.Getenv("CIRCLE_ENTITY_SECRET_CIPHERTEXT"); circleEntitySecretCiphertext != "" {
+		viper.Set("circle.entity_secret_ciphertext", circleEntitySecretCiphertext)
 	}
 	if circleWalletSetID := os.Getenv("CIRCLE_DEFAULT_WALLET_SET_ID"); circleWalletSetID != "" {
 		viper.Set("circle.default_wallet_set_id", circleWalletSetID)
@@ -540,9 +540,7 @@ func validate(config *Config) error {
 		return fmt.Errorf("database configuration is incomplete")
 	}
 
-	if strings.TrimSpace(config.Circle.EntitySecretCiphertext) == "" {
-		return fmt.Errorf("circle entity secret ciphertext is required")
-	}
+	// Entity secret is now generated dynamically, no validation needed
 
 	if len(config.Circle.SupportedChains) == 0 {
 		return fmt.Errorf("circle supported chains configuration is required")

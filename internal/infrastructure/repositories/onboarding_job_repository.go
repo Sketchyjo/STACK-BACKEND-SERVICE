@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -36,12 +37,21 @@ func (r *OnboardingJobRepository) Create(ctx context.Context, job *entities.Onbo
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		)`
 
-	_, err := r.db.ExecContext(ctx, query,
+	// Convert payload map to JSON for PostgreSQL JSONB storage
+	payloadJSON, err := json.Marshal(job.Payload)
+	if err != nil {
+		r.logger.Error("Failed to marshal job payload to JSON",
+			zap.String("user_id", job.UserID.String()),
+			zap.Error(err))
+		return fmt.Errorf("failed to marshal job payload: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx, query,
 		job.ID,
 		job.UserID,
 		string(job.Status),
 		string(job.JobType),
-		job.Payload,
+		payloadJSON,
 		job.AttemptCount,
 		job.MaxAttempts,
 		job.NextRetryAt,

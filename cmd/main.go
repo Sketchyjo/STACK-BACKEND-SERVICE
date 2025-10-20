@@ -14,7 +14,7 @@ import (
 	"github.com/stack-service/stack_service/internal/infrastructure/database"
 	"github.com/stack-service/stack_service/internal/infrastructure/di"
 	"github.com/stack-service/stack_service/internal/workers/funding_webhook"
-	"github.com/stack-service/stack_service/internal/workers/wallet_provisioning"
+	walletprovisioning "github.com/stack-service/stack_service/internal/workers/wallet_provisioning"
 	"github.com/stack-service/stack_service/pkg/logger"
 
 	"github.com/gin-gonic/gin"
@@ -78,7 +78,6 @@ func main() {
 
 	// Initialize wallet provisioning worker and scheduler
 	workerConfig := walletprovisioning.DefaultConfig()
-	workerConfig.EntitySecretCiphertext = cfg.Circle.EntitySecretCiphertext
 	workerConfig.WalletSetNamePrefix = cfg.Circle.DefaultWalletSetName
 	workerConfig.ChainsToProvision = container.WalletService.SupportedChains()
 	workerConfig.DefaultWalletSetID = cfg.Circle.DefaultWalletSetID

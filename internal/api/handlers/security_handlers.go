@@ -10,20 +10,23 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/stack-service/stack_service/internal/domain/entities"
+	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
 	"github.com/stack-service/stack_service/internal/domain/services/passcode"
 )
 
 // SecurityHandlers manages sensitive security endpoints such as passcodes
 type SecurityHandlers struct {
-	passcodeService *passcode.Service
-	logger          *zap.Logger
+	passcodeService   *passcode.Service
+	onboardingService *onboarding.Service
+	logger            *zap.Logger
 }
 
 // NewSecurityHandlers constructs SecurityHandlers
-func NewSecurityHandlers(passcodeService *passcode.Service, logger *zap.Logger) *SecurityHandlers {
+func NewSecurityHandlers(passcodeService *passcode.Service, onboardingService *onboarding.Service, logger *zap.Logger) *SecurityHandlers {
 	return &SecurityHandlers{
-		passcodeService: passcodeService,
-		logger:          logger,
+		passcodeService:   passcodeService,
+		onboardingService: onboardingService,
+		logger:            logger,
 	}
 }
 
@@ -91,6 +94,16 @@ func (h *SecurityHandlers) CreatePasscode(c *gin.Context) {
 			h.respondWithInternalError(c, "PASSCODE_SETUP_FAILED", "Failed to configure passcode")
 		}
 		return
+	}
+
+	// Trigger wallet creation after passcode creation
+	if h.onboardingService != nil {
+		if err := h.onboardingService.CompletePasscodeCreation(ctx, userID); err != nil {
+			h.logger.Warn("Failed to complete passcode creation in onboarding flow",
+				zap.Error(err),
+				zap.String("user_id", userID.String()))
+			// Don't fail the passcode creation, just log the warning
+		}
 	}
 
 	c.JSON(http.StatusCreated, gin.H{

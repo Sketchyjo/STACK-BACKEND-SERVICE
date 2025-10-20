@@ -140,9 +140,10 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 
 	// Initialize external services
 	circleConfig := circle.Config{
-		APIKey:      cfg.Circle.APIKey,
-		Environment: cfg.Circle.Environment,
-		BaseURL:     cfg.Circle.BaseURL,
+		APIKey:                 cfg.Circle.APIKey,
+		Environment:            cfg.Circle.Environment,
+		BaseURL:                cfg.Circle.BaseURL,
+		EntitySecretCiphertext: cfg.Circle.EntitySecretCiphertext,
 	}
 	circleClient := circle.NewClient(circleConfig, zapLog)
 
@@ -282,10 +283,9 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 func (c *Container) initializeDomainServices() error {
 	defaultWalletChains := convertWalletChains(c.Config.Circle.SupportedChains, c.ZapLog)
 	walletServiceConfig := wallet.Config{
-		EntitySecretCiphertext: c.Config.Circle.EntitySecretCiphertext,
-		WalletSetNamePrefix:    c.Config.Circle.DefaultWalletSetName,
-		SupportedChains:        defaultWalletChains,
-		DefaultWalletSetID:     c.Config.Circle.DefaultWalletSetID,
+		WalletSetNamePrefix: c.Config.Circle.DefaultWalletSetName,
+		SupportedChains:     defaultWalletChains,
+		DefaultWalletSetID:  c.Config.Circle.DefaultWalletSetID,
 	}
 
 	// Initialize wallet service first (no dependencies on other domain services)

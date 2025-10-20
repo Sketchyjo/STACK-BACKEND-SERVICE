@@ -411,3 +411,321 @@ func GetWalletStatus(db *sql.DB, cfg *config.Config, log *logger.Logger) gin.Han
 		})
 	}
 }
+
+// InitiateWalletCreation handles POST /api/v1/wallets/initiate
+// @Summary Initiate developer-controlled wallet creation after passcode verification
+// @Description Creates developer-controlled wallets using pre-registered Entity Secret Ciphertext across specified testnet chains after passcode verification
+// @Tags wallet
+// @Accept json
+// @Produce json
+// @Param request body entities.WalletInitiationRequest true "Wallet initiation request with optional chains"
+// @Success 202 {object} entities.WalletInitiationResponse
+// @Failure 400 {object} entities.ErrorResponse
+// @Failure 500 {object} entities.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/wallets/initiate [post]
+func (h *WalletHandlers) InitiateWalletCreation(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req entities.WalletInitiationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warn("Invalid wallet initiation request", zap.Error(err))
+		c.JSON(http.StatusBadRequest, entities.ErrorResponse{
+			Code:    "INVALID_REQUEST",
+			Message: "Invalid request payload",
+			Details: map[string]interface{}{"error": err.Error()},
+		})
+		return
+	}
+
+	// Get user ID from context (set by auth middleware)
+	userIDStr, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
+			Code:    "UNAUTHORIZED",
+			Message: "User ID not found in context",
+		})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr.(string))
+	if err != nil {
+		h.logger.Error("Invalid user ID in context", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+			Code:    "INTERNAL_ERROR",
+			Message: "Invalid user context",
+		})
+		return
+	}
+
+	// Default to testnet chains if not specified
+	chains := req.Chains
+	if len(chains) == 0 {
+		// Default testnet chains: SOL-DEVNET, APTOS-TESTNET, MATIC-AMOY, BASE-SEPOLIA
+		chains = []string{string(entities.ChainSOLDevnet), string(entities.ChainAPTOSTestnet),
+			string(entities.ChainMATICAmoy), string(entities.ChainBASESepolia)}
+	}
+
+	// Validate chains - ensure only testnet chains
+	for _, chainStr := range chains {
+		chain := entities.WalletChain(chainStr)
+		if !chain.IsValid() {
+			h.logger.Warn("Invalid chain in request", zap.String("chain", chainStr))
+			c.JSON(http.StatusBadRequest, entities.ErrorResponse{
+				Code:    "INVALID_CHAIN",
+				Message: "Invalid blockchain network",
+				Details: map[string]interface{}{
+					"chain":            chainStr,
+					"supported_chains": []string{"SOL-DEVNET", "APTOS-TESTNET", "MATIC-AMOY", "BASE-SEPOLIA"},
+				},
+			})
+			return
+		}
+
+		// Ensure only testnet chains
+		if !chain.IsTestnet() {
+			h.logger.Warn("Mainnet chain not supported for wallet creation", zap.String("chain", chainStr))
+			c.JSON(http.StatusBadRequest, entities.ErrorResponse{
+				Code:    "MAINNET_NOT_SUPPORTED",
+				Message: "Only testnet chains are supported at this time",
+				Details: map[string]interface{}{
+					"requested_chain":  chainStr,
+					"supported_chains": []string{"SOL-DEVNET", "APTOS-TESTNET", "MATIC-AMOY", "BASE-SEPOLIA"},
+				},
+			})
+			return
+		}
+	}
+
+	// Convert chain strings to entities
+	var chainEntities []entities.WalletChain
+	for _, chainStr := range chains {
+		chainEntities = append(chainEntities, entities.WalletChain(chainStr))
+	}
+
+	h.logger.Info("Initiating developer-controlled wallet creation for user",
+		zap.String("user_id", userID.String()),
+		zap.Strings("chains", chains))
+
+	// Create developer-controlled wallets for user
+	err = h.walletService.CreateWalletsForUser(ctx, userID, chainEntities)
+	if err != nil {
+		h.logger.Error("Failed to initiate developer-controlled wallet creation",
+			zap.Error(err),
+			zap.String("user_id", userID.String()))
+		c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+			Code:    "WALLET_INITIATION_FAILED",
+			Message: "Failed to initiate developer-controlled wallet creation",
+			Details: map[string]interface{}{"error": "Internal server error"},
+		})
+		return
+	}
+
+	// Get provisioning job status
+	job, err := h.walletService.GetProvisioningJobByUserID(ctx, userID)
+	if err != nil {
+		h.logger.Warn("Failed to get provisioning job status", zap.Error(err))
+		// Don't fail the request, just return a basic response
+		c.JSON(http.StatusAccepted, entities.WalletInitiationResponse{
+			Message: "Developer-controlled wallet creation initiated",
+			UserID:  userID.String(),
+			Chains:  chains,
+		})
+		return
+	}
+
+	response := entities.WalletInitiationResponse{
+		Message: "Developer-controlled wallet creation initiated successfully",
+		UserID:  userID.String(),
+		Chains:  chains,
+		Job: &entities.WalletProvisioningJobResponse{
+			ID:           job.ID,
+			Status:       string(job.Status),
+			Progress:     "0%",
+			AttemptCount: job.AttemptCount,
+			MaxAttempts:  job.MaxAttempts,
+			ErrorMessage: job.ErrorMessage,
+			NextRetryAt:  job.NextRetryAt,
+			CreatedAt:    job.CreatedAt,
+		},
+	}
+
+	h.logger.Info("Developer-controlled wallet creation initiated",
+		zap.String("user_id", userID.String()),
+		zap.String("job_id", job.ID.String()),
+		zap.Strings("chains", chains))
+
+	c.JSON(http.StatusAccepted, response)
+}
+
+// ProvisionWallets handles POST /api/v1/wallets/provision
+// @Summary Provision wallets for user
+// @Description Triggers wallet provisioning across supported chains for the authenticated user
+// @Tags wallet
+// @Accept json
+// @Produce json
+// @Param request body entities.WalletProvisioningRequest true "Wallet provisioning request"
+// @Success 202 {object} entities.WalletProvisioningResponse
+// @Failure 400 {object} entities.ErrorResponse
+// @Failure 500 {object} entities.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/wallets/provision [post]
+func (h *WalletHandlers) ProvisionWallets(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req entities.WalletProvisioningRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warn("Invalid wallet provisioning request", zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "INVALID_REQUEST",
+			"message": "Invalid request payload",
+		})
+		return
+	}
+
+	// Get user ID from context (set by auth middleware)
+	userIDStr, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":   "UNAUTHORIZED",
+			"message": "User ID not found in context",
+		})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr.(string))
+	if err != nil {
+		h.logger.Error("Invalid user ID in context", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "INTERNAL_ERROR",
+			"message": "Invalid user context",
+		})
+		return
+	}
+
+	// Convert chain strings to entities
+	var chains []entities.WalletChain
+	if len(req.Chains) > 0 {
+		for _, chainStr := range req.Chains {
+			chain := entities.WalletChain(chainStr)
+			if !chain.IsValid() {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "INVALID_CHAIN",
+					"message": fmt.Sprintf("Invalid chain: %s", chainStr),
+				})
+				return
+			}
+			chains = append(chains, chain)
+		}
+	}
+
+	// Create wallets for user
+	err = h.walletService.CreateWalletsForUser(ctx, userID, chains)
+	if err != nil {
+		h.logger.Error("Failed to create wallets for user",
+			zap.Error(err),
+			zap.String("user_id", userID.String()))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "PROVISIONING_FAILED",
+			"message": "Failed to start wallet provisioning",
+		})
+		return
+	}
+
+	// Get provisioning job status
+	job, err := h.walletService.GetProvisioningJobByUserID(ctx, userID)
+	if err != nil {
+		h.logger.Warn("Failed to get provisioning job status", zap.Error(err))
+		// Don't fail the request, just return a basic response
+		c.JSON(http.StatusAccepted, gin.H{
+			"message": "Wallet provisioning started",
+			"user_id": userID.String(),
+		})
+		return
+	}
+
+	response := entities.WalletProvisioningResponse{
+		Message: "Wallet provisioning started",
+		Job: entities.WalletProvisioningJobResponse{
+			ID:           job.ID,
+			Status:       string(job.Status),
+			Progress:     "0%",
+			AttemptCount: job.AttemptCount,
+			MaxAttempts:  job.MaxAttempts,
+			ErrorMessage: job.ErrorMessage,
+			NextRetryAt:  job.NextRetryAt,
+			CreatedAt:    job.CreatedAt,
+		},
+	}
+
+	c.JSON(http.StatusAccepted, response)
+}
+
+// GetWalletByChain handles GET /api/v1/wallets/:chain/address
+// @Summary Get wallet address for specific chain
+// @Description Returns the wallet address for the authenticated user on the specified chain
+// @Tags wallet
+// @Produce json
+// @Param chain path string true "Blockchain network" Enums(ETH,ETH-SEPOLIA,MATIC,MATIC-AMOY,SOL,SOL-DEVNET,APTOS,APTOS-TESTNET,AVAX,BASE,BASE-SEPOLIA)
+// @Success 200 {object} entities.WalletAddressResponse
+// @Failure 400 {object} entities.ErrorResponse
+// @Failure 404 {object} entities.ErrorResponse "Wallet not found for chain"
+// @Failure 500 {object} entities.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/wallets/{chain}/address [get]
+func (h *WalletHandlers) GetWalletByChain(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	chainStr := c.Param("chain")
+	chain := entities.WalletChain(chainStr)
+
+	if !chain.IsValid() {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "INVALID_CHAIN",
+			"message": fmt.Sprintf("Invalid chain: %s", chainStr),
+		})
+		return
+	}
+
+	// Get user ID from context
+	userIDStr, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":   "UNAUTHORIZED",
+			"message": "User ID not found in context",
+		})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr.(string))
+	if err != nil {
+		h.logger.Error("Invalid user ID in context", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "INTERNAL_ERROR",
+			"message": "Invalid user context",
+		})
+		return
+	}
+
+	// Get wallet for the specific chain
+	wallet, err := h.walletService.GetWalletByUserAndChain(ctx, userID, chain)
+	if err != nil {
+		h.logger.Warn("Wallet not found for chain",
+			zap.Error(err),
+			zap.String("user_id", userID.String()),
+			zap.String("chain", chainStr))
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "WALLET_NOT_FOUND",
+			"message": fmt.Sprintf("No wallet found for chain: %s", chainStr),
+		})
+		return
+	}
+
+	response := entities.WalletAddressResponse{
+		Chain:   chain,
+		Address: wallet.Address,
+		Status:  string(wallet.Status),
+	}
+
+	c.JSON(http.StatusOK, response)
+}

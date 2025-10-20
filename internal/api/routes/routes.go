@@ -41,7 +41,7 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 	// investingHandlers := handlers.NewInvestingHandlers(container.GetInvestingService(), container.Logger)
 	onboardingHandlers := handlers.NewOnboardingHandlers(container.GetOnboardingService(), container.ZapLog)
 	walletHandlers := handlers.NewWalletHandlers(container.GetWalletService(), container.ZapLog)
-	securityHandlers := handlers.NewSecurityHandlers(container.GetPasscodeService(), container.ZapLog)
+	securityHandlers := handlers.NewSecurityHandlers(container.GetPasscodeService(), container.GetOnboardingService(), container.ZapLog)
 
 	// Initialize AI-CFO and ZeroG handlers
 	aicfoHandlers := handlers.NewAICfoHandler(container.GetAICfoService(), container.ZapLog)
@@ -161,6 +161,14 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 				wallet.GET("/status", walletHandlers.GetWalletStatus)
 			}
 
+			// Enhanced wallet endpoints
+			wallets := protected.Group("/wallets")
+			{
+				wallets.POST("/initiate", walletHandlers.InitiateWalletCreation)
+				wallets.POST("/provision", walletHandlers.ProvisionWallets)
+				wallets.GET("/:chain/address", walletHandlers.GetWalletByChain)
+			}
+
 			// Investment baskets
 			baskets := protected.Group("/baskets")
 			{
@@ -258,6 +266,14 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 			admin.POST("/wallet/create", walletHandlers.CreateWalletsForUser)
 			admin.POST("/wallet/retry-provisioning", walletHandlers.RetryWalletProvisioning)
 			admin.GET("/wallet/health", walletHandlers.HealthCheck)
+
+			// Wallet set management
+			admin.POST("/wallet-sets", handlers.CreateWalletSet(container.DB, container.Config, container.Logger))
+			admin.GET("/wallet-sets", handlers.GetWalletSets(container.DB, container.Config, container.Logger))
+			admin.GET("/wallet-sets/:id", handlers.GetWalletSetByID(container.DB, container.Config, container.Logger))
+
+			// Enhanced wallet management
+			admin.GET("/wallets", handlers.GetAdminWallets(container.DB, container.Config, container.Logger))
 		}
 
 		// Webhooks (external systems) - OpenAPI spec compliant

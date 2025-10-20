@@ -137,9 +137,7 @@ func (ws *WalletSet) Validate() error {
 		return fmt.Errorf("circle wallet set ID is required")
 	}
 
-	if ws.EntitySecretCiphertext == "" {
-		return fmt.Errorf("entity secret ciphertext is required")
-	}
+	// Entity secret is now generated dynamically, no validation needed
 
 	if ws.Status != WalletSetStatusActive && ws.Status != WalletSetStatusInactive {
 		return fmt.Errorf("invalid wallet set status: %s", ws.Status)
@@ -355,13 +353,37 @@ type WalletProvisioningJobResponse struct {
 	CreatedAt    time.Time  `json:"createdAt"`
 }
 
+// WalletInitiationRequest represents request to initiate wallet creation after passcode verification
+type WalletInitiationRequest struct {
+	Chains []string `json:"chains,omitempty" validate:"omitempty,dive,oneof=SOL-DEVNET APTOS-TESTNET MATIC-AMOY BASE-SEPOLIA"`
+}
+
+// WalletInitiationResponse represents response for wallet initiation
+type WalletInitiationResponse struct {
+	Message string                         `json:"message"`
+	UserID  string                         `json:"user_id"`
+	Chains  []string                       `json:"chains"`
+	Job     *WalletProvisioningJobResponse `json:"job,omitempty"`
+}
+
+// WalletProvisioningRequest represents request to provision wallets
+type WalletProvisioningRequest struct {
+	Chains []string `json:"chains,omitempty" validate:"omitempty,dive,oneof=ETH ETH-SEPOLIA MATIC MATIC-AMOY SOL SOL-DEVNET APTOS APTOS-TESTNET AVAX BASE BASE-SEPOLIA"`
+}
+
+// WalletProvisioningResponse represents response for wallet provisioning
+type WalletProvisioningResponse struct {
+	Message string                        `json:"message"`
+	Job     WalletProvisioningJobResponse `json:"job"`
+}
+
 // === Circle API Models ===
 
 // CircleWalletSetRequest represents Circle wallet set creation request
 type CircleWalletSetRequest struct {
 	IdempotencyKey         string `json:"idempotencyKey,omitempty"`
-	Name                   string `json:"name"`
 	EntitySecretCiphertext string `json:"entitySecretCiphertext"`
+	Name                   string `json:"name"`
 }
 
 // CircleWalletSetResponse represents Circle wallet set response
@@ -371,9 +393,10 @@ type CircleWalletSetResponse struct {
 
 // UnmarshalJSON normalizes Circle wallet set responses that may wrap data
 func (r *CircleWalletSetResponse) UnmarshalJSON(data []byte) error {
-	type alias CircleWalletSetResponse
 	aux := struct {
-		Data      *alias               `json:"data"`
+		Data struct {
+			WalletSet CircleWalletSetData `json:"walletSet"`
+		} `json:"data"`
 		WalletSet *CircleWalletSetData `json:"walletSet"`
 	}{}
 
@@ -381,15 +404,20 @@ func (r *CircleWalletSetResponse) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	switch {
-	case aux.Data != nil && aux.Data.WalletSet.ID != "":
+	// Check if wrapped in data.walletSet first
+	if aux.Data.WalletSet.ID != "" {
 		r.WalletSet = aux.Data.WalletSet
-	case aux.WalletSet != nil && aux.WalletSet.ID != "":
-		r.WalletSet = *aux.WalletSet
-	default:
-		r.WalletSet = CircleWalletSetData{}
+		return nil
 	}
 
+	// Fallback to direct walletSet field
+	if aux.WalletSet != nil && aux.WalletSet.ID != "" {
+		r.WalletSet = *aux.WalletSet
+		return nil
+	}
+
+	// Default empty structure
+	r.WalletSet = CircleWalletSetData{}
 	return nil
 }
 
@@ -405,10 +433,11 @@ type CircleWalletSetData struct {
 // CircleWalletCreateRequest represents Circle wallet creation request
 type CircleWalletCreateRequest struct {
 	IdempotencyKey         string   `json:"idempotencyKey,omitempty"`
-	WalletSetID            string   `json:"walletSetId"`
+	EntitySecretCiphertext string   `json:"entitySecretCipherText"`
 	Blockchains            []string `json:"blockchains"`
+	Count                  int      `json:"count,omitempty"`
 	AccountType            string   `json:"accountType"`
-	EntitySecretCiphertext string   `json:"entitySecretCiphertext"`
+	WalletSetID            string   `json:"walletSetId"`
 }
 
 // CircleWalletCreateResponse represents Circle wallet creation response
@@ -416,12 +445,54 @@ type CircleWalletCreateResponse struct {
 	Wallet CircleWalletData `json:"wallet"`
 }
 
+// CircleWalletCreateBulkResponse represents Circle wallet creation response for bulk operations
+type CircleWalletCreateBulkResponse struct {
+	Wallets []CircleWalletData `json:"wallets"`
+}
+
 // UnmarshalJSON normalizes Circle wallet responses that may wrap data
 func (r *CircleWalletCreateResponse) UnmarshalJSON(data []byte) error {
-	type alias CircleWalletCreateResponse
 	aux := struct {
-		Data   *alias           `json:"data"`
-		Wallet CircleWalletData `json:"wallet"`
+		Data struct {
+			Wallets []CircleWalletData `json:"wallets"`
+		} `json:"data"`
+		Wallet  *CircleWalletData   `json:"wallet"`
+		Wallets []CircleWalletData  `json:"wallets"`
+	}{}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Check if wrapped in data.wallets first (most common format)
+	if len(aux.Data.Wallets) > 0 {
+		r.Wallet = aux.Data.Wallets[0] // Take first wallet for single response
+		return nil
+	}
+
+	// Check direct wallets array
+	if len(aux.Wallets) > 0 {
+		r.Wallet = aux.Wallets[0]
+		return nil
+	}
+
+	// Fallback to direct wallet field
+	if aux.Wallet != nil && aux.Wallet.ID != "" {
+		r.Wallet = *aux.Wallet
+		return nil
+	}
+
+	// Default empty structure
+	r.Wallet = CircleWalletData{}
+	return nil
+}
+
+// UnmarshalJSON normalizes Circle bulk wallet responses that may wrap data
+func (r *CircleWalletCreateBulkResponse) UnmarshalJSON(data []byte) error {
+	type alias CircleWalletCreateBulkResponse
+	aux := struct {
+		Data    *alias             `json:"data"`
+		Wallets []CircleWalletData `json:"wallets"`
 	}{}
 
 	if err := json.Unmarshal(data, &aux); err != nil {
@@ -429,12 +500,12 @@ func (r *CircleWalletCreateResponse) UnmarshalJSON(data []byte) error {
 	}
 
 	switch {
-	case aux.Data != nil && aux.Data.Wallet.ID != "":
-		r.Wallet = aux.Data.Wallet
-	case aux.Wallet.ID != "":
-		r.Wallet = aux.Wallet
+	case aux.Data != nil && len(aux.Data.Wallets) > 0:
+		r.Wallets = aux.Data.Wallets
+	case len(aux.Wallets) > 0:
+		r.Wallets = aux.Wallets
 	default:
-		r.Wallet = CircleWalletData{}
+		r.Wallets = []CircleWalletData{}
 	}
 
 	return nil
@@ -446,7 +517,10 @@ type CircleWalletData struct {
 	State       string                `json:"state"`
 	WalletSetId string                `json:"walletSetId"`
 	CustodyType string                `json:"custodyType"`
-	Addresses   []CircleWalletAddress `json:"addresses"`
+	AccountType string                `json:"accountType,omitempty"`
+	Addresses   []CircleWalletAddress `json:"addresses,omitempty"`
+	Address     string                `json:"address,omitempty"` // For single address responses
+	Blockchain  string                `json:"blockchain,omitempty"`
 	CreatedDate time.Time             `json:"createDate"`
 	UpdatedDate time.Time             `json:"updateDate"`
 }
@@ -481,4 +555,156 @@ func (e CircleErrorResponse) Error() string {
 		return fmt.Sprintf("Circle API error %d: %s (%s)", e.Code, e.Message, strings.Join(details, ", "))
 	}
 	return fmt.Sprintf("Circle API error %d: %s", e.Code, e.Message)
+}
+
+// CircleAPIError represents a comprehensive Circle API error with type information
+type CircleAPIError struct {
+	Code       int                `json:"code"`
+	Message    string             `json:"message"`
+	Errors     []CircleFieldError `json:"errors,omitempty"`
+	RequestID  string             `json:"request_id,omitempty"`
+	RetryAfter *time.Duration     `json:"retry_after,omitempty"`
+	Type       string             `json:"type"`
+}
+
+// Error implements error interface
+func (e CircleAPIError) Error() string {
+	if len(e.Errors) > 0 {
+		var details []string
+		for _, fieldErr := range e.Errors {
+			details = append(details, fmt.Sprintf("%s: %s", fieldErr.Field, fieldErr.Message))
+		}
+		return fmt.Sprintf("Circle %s error %d: %s (%s)", e.Type, e.Code, e.Message, strings.Join(details, ", "))
+	}
+	return fmt.Sprintf("Circle %s error %d: %s", e.Type, e.Code, e.Message)
+}
+
+// IsRetryable returns true if the error is retryable
+func (e CircleAPIError) IsRetryable() bool {
+	switch e.Code {
+	case 429: // Rate limit
+		return true
+	case 500, 502, 503, 504: // Server errors
+		return true
+	default:
+		return false
+	}
+}
+
+// GetRetryAfter returns the retry delay for rate limit errors
+func (e CircleAPIError) GetRetryAfter() time.Duration {
+	if e.RetryAfter != nil {
+		return *e.RetryAfter
+	}
+	// Default backoff for server errors
+	if e.Code >= 500 {
+		return 5 * time.Second
+	}
+	return 0
+}
+
+// CircleAuthError represents authentication/authorization errors
+type CircleAuthError struct {
+	CircleAPIError
+}
+
+// CircleValidationError represents validation errors
+type CircleValidationError struct {
+	CircleAPIError
+}
+
+// CircleRateLimitError represents rate limit errors
+type CircleRateLimitError struct {
+	CircleAPIError
+}
+
+// CircleConflictError represents conflict errors (duplicate resources)
+type CircleConflictError struct {
+	CircleAPIError
+}
+
+// CircleServerError represents server errors
+type CircleServerError struct {
+	CircleAPIError
+}
+
+// NewCircleAPIError creates a new Circle API error with proper typing
+func NewCircleAPIError(code int, message string, requestID string, retryAfter *time.Duration) error {
+	baseError := CircleAPIError{
+		Code:       code,
+		Message:    message,
+		RequestID:  requestID,
+		RetryAfter: retryAfter,
+	}
+
+	switch {
+	case code == 401 || code == 403:
+		baseError.Type = "auth"
+		return CircleAuthError{baseError}
+	case code == 400:
+		baseError.Type = "validation"
+		return CircleValidationError{baseError}
+	case code == 429:
+		baseError.Type = "rate_limit"
+		return CircleRateLimitError{baseError}
+	case code == 409:
+		baseError.Type = "conflict"
+		return CircleConflictError{baseError}
+	case code >= 500:
+		baseError.Type = "server"
+		return CircleServerError{baseError}
+	default:
+		baseError.Type = "client"
+		return baseError
+	}
+}
+
+// WalletListFilters represents filters for wallet listing
+type WalletListFilters struct {
+	UserID      *uuid.UUID `json:"user_id,omitempty"`
+	WalletSetID *uuid.UUID `json:"wallet_set_id,omitempty"`
+	Chain       string     `json:"chain,omitempty"`
+	AccountType string     `json:"account_type,omitempty"`
+	Status      string     `json:"status,omitempty"`
+	Limit       int        `json:"limit"`
+	Offset      int        `json:"offset"`
+}
+
+// CircleTransferRequest represents a request to transfer funds using Circle API
+type CircleTransferRequest struct {
+	IDempotencyKey         string   `json:"idempotencyKey"`
+	EntitySecretCiphertext string   `json:"entitySecretCiphertext"`
+	WalletID               string   `json:"walletId"`
+	TokenID                string   `json:"tokenId"`
+	Amounts                []string `json:"amounts"`
+	DestinationAddress     string   `json:"destinationAddress,omitempty"`
+	DestinationWalletID    string   `json:"destinationWalletId,omitempty"`
+	DestinationTag         string   `json:"destinationTag,omitempty"`
+	DestinationMemo        string   `json:"destinationMemo,omitempty"`
+	DestinationMemoType    string   `json:"destinationMemoType,omitempty"`
+	RefID                  string   `json:"refId,omitempty"`
+	Fee                    string   `json:"fee,omitempty"`
+	FeeLevel               string   `json:"feeLevel,omitempty"`
+	MaxFee                 string   `json:"maxFee,omitempty"`
+	PriorityFee            string   `json:"priorityFee,omitempty"`
+	GasPrice               string   `json:"gasPrice,omitempty"`
+	GasLimit               string   `json:"gasLimit,omitempty"`
+	Nonce                  string   `json:"nonce,omitempty"`
+	Note                   string   `json:"note,omitempty"`
+	AutoGas                bool     `json:"autoGas,omitempty"`
+	NetworkFee             string   `json:"networkFee,omitempty"`
+	ReplaceTxByHash        string   `json:"replaceTxByHash,omitempty"`
+	SequenceID             string   `json:"sequenceId,omitempty"`
+	SourceAddress          string   `json:"sourceAddress,omitempty"`
+	SourceAddressTag       string   `json:"sourceAddressTag,omitempty"`
+	SourceAddressMemo      string   `json:"sourceAddressMemo,omitempty"`
+	SourceAddressMemoType  string   `json:"sourceAddressMemoType,omitempty"`
+	SourceWalletID         string   `json:"sourceWalletId,omitempty"`
+	SourceTag              string   `json:"sourceTag,omitempty"`
+	SourceMemo             string   `json:"sourceMemo,omitempty"`
+	SourceMemoType         string   `json:"sourceMemoType,omitempty"`
+	TrackingRef            string   `json:"trackingRef,omitempty"`
+	TxHash                 string   `json:"txHash,omitempty"`
+	TxType                 string   `json:"txType,omitempty"`
+	WalletSetID            string   `json:"walletSetId,omitempty"`
 }
