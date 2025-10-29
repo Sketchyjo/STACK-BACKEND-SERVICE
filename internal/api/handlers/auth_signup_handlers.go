@@ -277,7 +277,7 @@ func (h *AuthSignupHandlers) bootstrapKYCApplicant(ctx context.Context, user *en
 		return
 	}
 
-	if err := h.userRepo.UpdateKYCProvider(ctx, user.ID, applicantID, entities.KYCStatusProcessing); err != nil {
+	if err := h.userRepo.UpdateKYCProvider(ctx, user.ID, applicantID, entities.KYCStatusPending); err != nil {
 		h.logger.Warn("Failed to update user with KYC provider reference", zap.Error(err), zap.String("user_id", user.ID.String()))
 		return
 	}

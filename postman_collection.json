@@ -49,6 +49,14 @@
     {
       "key": "order_id",
       "value": "order_123"
+    },
+    {
+      "key": "wallet_set_id",
+      "value": "ws_123"
+    },
+    {
+      "key": "chain",
+      "value": "ethereum"
     }
   ],
   "item": [
@@ -1782,6 +1790,173 @@
                 }
               ],
               "body": "{\n  \"status\": \"error\",\n  \"error\": \"Get Wallet Status failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Initiate Wallet Creation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/wallets/initiate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "wallets",
+                "initiate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "Accepted",
+              "code": 202,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"message\": \"Wallet creation initiated\"\n  }\n}"
+            },
+            {
+              "name": "Failure",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Initiate Wallet Creation failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Provision Wallets",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/wallets/provision",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "wallets",
+                "provision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"chains\": [\"ethereum\", \"polygon\"]\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "Accepted",
+              "code": 202,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"message\": \"Wallets provisioned successfully\"\n  }\n}"
+            },
+            {
+              "name": "Failure",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Provision Wallets failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Wallet By Chain",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/wallets/ethereum/address",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "wallets",
+                "ethereum",
+                "address"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"chain\": \"ethereum\",\n    \"address\": \"0x123...\",\n    \"status\": \"active\"\n  }\n}"
+            },
+            {
+              "name": "Failure",
+              "status": "Not Found",
+              "code": 404,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Wallet not found for chain\",\n  \"code\": \"NOT_FOUND\"\n}"
             }
           ]
         }
@@ -4424,6 +4599,221 @@
               "body": "{\n  \"status\": \"error\",\n  \"error\": \"Wallet Health failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
             }
           ]
+        },
+        {
+          "name": "Create Wallet Set",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/wallet-sets",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "wallet-sets"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"name\": \"Main Wallet Set\",\n  \"description\": \"Primary wallet set for user\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "Created",
+              "code": 201,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"wallet_set_id\": \"ws_123\",\n    \"message\": \"Wallet set created\"\n  }\n}"
+            },
+            {
+              "name": "Failure",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Create Wallet Set failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Wallet Sets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/wallet-sets",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "wallet-sets"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"wallet_sets\": [\n      {\n        \"id\": \"ws_123\",\n        \"user_id\": \"{{user_id}}\",\n        \"name\": \"Main Wallet Set\",\n        \"status\": \"active\"\n      }\n    ]\n  }\n}"
+            },
+            {
+              "name": "Failure",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Get Wallet Sets failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Wallet Set By ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/wallet-sets/ws_123",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "wallet-sets",
+                "ws_123"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"id\": \"ws_123\",\n    \"user_id\": \"{{user_id}}\",\n    \"name\": \"Main Wallet Set\",\n    \"description\": \"Primary wallet set for user\",\n    \"wallets\": [\n      {\n        \"chain\": \"ethereum\",\n        \"address\": \"0x123...\"\n      }\n    ],\n    \"status\": \"active\",\n    \"created_at\": \"2024-01-01T00:00:00Z\"\n  }\n}"
+            },
+            {
+              "name": "Failure",
+              "status": "Not Found",
+              "code": 404,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Wallet set not found\",\n  \"code\": \"NOT_FOUND\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Admin Wallets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/wallets?user_id={{user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "wallets"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"wallets\": [\n      {\n        \"id\": \"wallet_123\",\n        \"user_id\": \"{{user_id}}\",\n        \"chain\": \"ethereum\",\n        \"address\": \"0x123...\",\n        \"status\": \"active\",\n        \"balance\": \"1000.00\"\n      }\n    ],\n    \"total\": 1\n  }\n}"
+            },
+            {
+              "name": "Failure",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Get Admin Wallets failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -5672,6 +6062,55 @@
                 }
               ],
               "body": "{\n  \"status\": \"error\",\n  \"error\": \"Get Portfolio failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Portfolio Overview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/portfolio/overview",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "portfolio",
+                "overview"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"totalValue\": \"10000.00\",\n    \"buyingPower\": \"2500.00\",\n    \"positions\": [\n      {\n        \"asset\": \"BTC\",\n        \"quantity\": 0.5,\n        \"value\": \"7500.00\"\n      }\n    ],\n    \"performance\": {\n      \"dayChange\": \"150.00\",\n      \"dayChangePercent\": \"1.5\"\n    }\n  }\n}"
+            },
+            {
+              "name": "Failure",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"Get Portfolio Overview failed\",\n  \"code\": \"BAD_REQUEST\"\n}"
             }
           ]
         },

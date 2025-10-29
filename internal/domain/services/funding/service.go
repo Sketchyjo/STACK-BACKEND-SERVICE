@@ -14,11 +14,12 @@ import (
 
 // Service handles funding operations - deposit addresses, confirmations, balance conversion
 type Service struct {
-	depositRepo DepositRepository
-	balanceRepo BalanceRepository
-	walletRepo  WalletRepository
-	circleAPI   CircleAdapter
-	logger      *logger.Logger
+	depositRepo       DepositRepository
+	balanceRepo       BalanceRepository
+	walletRepo        WalletRepository
+	managedWalletRepo ManagedWalletRepository
+	circleAPI         CircleAdapter
+	logger            *logger.Logger
 }
 
 // DepositRepository interface for deposit persistence
@@ -43,11 +44,18 @@ type WalletRepository interface {
 	Create(ctx context.Context, wallet *entities.Wallet) error
 }
 
+// ManagedWalletRepository interface for managed wallet operations
+type ManagedWalletRepository interface {
+	GetByUserID(ctx context.Context, userID uuid.UUID) ([]*entities.ManagedWallet, error)
+	GetByCircleWalletID(ctx context.Context, circleWalletID string) (*entities.ManagedWallet, error)
+}
+
 // CircleAdapter interface for Circle API integration
 type CircleAdapter interface {
 	GenerateDepositAddress(ctx context.Context, chain entities.Chain, userID uuid.UUID) (string, error)
 	ValidateDeposit(ctx context.Context, txHash string, amount decimal.Decimal) (bool, error)
 	ConvertToUSD(ctx context.Context, amount decimal.Decimal, token entities.Stablecoin) (decimal.Decimal, error)
+	GetWalletBalances(ctx context.Context, walletID string, tokenAddress ...string) (*entities.CircleWalletBalancesResponse, error)
 }
 
 // NewService creates a new funding service
@@ -55,15 +63,17 @@ func NewService(
 	depositRepo DepositRepository,
 	balanceRepo BalanceRepository,
 	walletRepo WalletRepository,
+	managedWalletRepo ManagedWalletRepository,
 	circleAPI CircleAdapter,
 	logger *logger.Logger,
 ) *Service {
 	return &Service{
-		depositRepo: depositRepo,
-		balanceRepo: balanceRepo,
-		walletRepo:  walletRepo,
-		circleAPI:   circleAPI,
-		logger:      logger,
+		depositRepo:       depositRepo,
+		balanceRepo:       balanceRepo,
+		walletRepo:        walletRepo,
+		managedWalletRepo: managedWalletRepo,
+		circleAPI:         circleAPI,
+		logger:            logger,
 	}
 }
 
@@ -139,8 +149,97 @@ func (s *Service) GetFundingConfirmations(ctx context.Context, userID uuid.UUID,
 	return confirmations, nil
 }
 
-// GetBalance returns user's current balance
+// GetBalance returns user's current balance with real-time Circle wallet balances
 func (s *Service) GetBalance(ctx context.Context, userID uuid.UUID) (*entities.BalancesResponse, error) {
+	s.logger.Info("Fetching user balance with real-time Circle wallet data", "user_id", userID.String())
+
+	// Get user's managed wallets
+	managedWallets, err := s.managedWalletRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		s.logger.Error("Failed to get managed wallets", "error", err, "user_id", userID.String())
+		// Fallback to database balance
+		return s.getDatabaseBalance(ctx, userID)
+	}
+
+	if len(managedWallets) == 0 {
+		s.logger.Info("No managed wallets found for user, returning zero balance", "user_id", userID.String())
+		return &entities.BalancesResponse{
+			BuyingPower:     "0.00",
+			PendingDeposits: "0.00",
+			Currency:        "USD",
+		}, nil
+	}
+
+	// Aggregate USDC balance from all Circle wallets
+	totalUSDCBalance := decimal.Zero
+	walletsProcessed := 0
+
+	for _, wallet := range managedWallets {
+		if wallet.CircleWalletID == "" || wallet.Status != entities.WalletStatusLive {
+			s.logger.Debug("Skipping wallet - not ready",
+				"wallet_id", wallet.ID.String(),
+				"circle_wallet_id", wallet.CircleWalletID,
+				"status", wallet.Status)
+			continue
+		}
+
+		// Fetch real-time balance from Circle API
+		balanceResp, err := s.circleAPI.GetWalletBalances(ctx, wallet.CircleWalletID)
+		if err != nil {
+			s.logger.Warn("Failed to fetch Circle wallet balance, skipping",
+				"error", err,
+				"wallet_id", wallet.ID.String(),
+				"circle_wallet_id", wallet.CircleWalletID,
+				"chain", wallet.Chain)
+			continue
+		}
+
+		// Extract USDC balance
+		usdcBalanceStr := balanceResp.GetUSDCBalance()
+		if usdcBalanceStr != "0" {
+			usdcBalance, err := decimal.NewFromString(usdcBalanceStr)
+			if err != nil {
+				s.logger.Warn("Failed to parse USDC balance",
+					"error", err,
+					"balance_str", usdcBalanceStr,
+					"circle_wallet_id", wallet.CircleWalletID)
+				continue
+			}
+
+			totalUSDCBalance = totalUSDCBalance.Add(usdcBalance)
+			walletsProcessed++
+
+			s.logger.Info("Retrieved wallet balance",
+				"circle_wallet_id", wallet.CircleWalletID,
+				"chain", wallet.Chain,
+				"usdc_balance", usdcBalanceStr,
+				"running_total", totalUSDCBalance.String())
+		}
+	}
+
+	s.logger.Info("Aggregated Circle wallet balances",
+		"user_id", userID.String(),
+		"total_usdc", totalUSDCBalance.String(),
+		"wallets_processed", walletsProcessed,
+		"total_wallets", len(managedWallets))
+
+	// Get pending deposits from database
+	pendingDeposits := decimal.Zero
+	dbBalance, err := s.balanceRepo.Get(ctx, userID)
+	if err == nil {
+		pendingDeposits = dbBalance.PendingDeposits
+	}
+
+	// USDC is 1:1 with USD, so buying power = USDC balance
+	return &entities.BalancesResponse{
+		BuyingPower:     totalUSDCBalance.String(),
+		PendingDeposits: pendingDeposits.String(),
+		Currency:        "USD",
+	}, nil
+}
+
+// getDatabaseBalance retrieves balance from database as fallback
+func (s *Service) getDatabaseBalance(ctx context.Context, userID uuid.UUID) (*entities.BalancesResponse, error) {
 	balance, err := s.balanceRepo.Get(ctx, userID)
 	if err != nil {
 		if err.Error() == "balance not found" {

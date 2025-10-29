@@ -364,7 +364,7 @@ database:
 # JWT configuration
 jwt:
   secret: "your-secret-key"
-  access_token_ttl: 3600
+  access_token_ttl: 604800
   refresh_token_ttl: 2592000
 
 # Blockchain networks

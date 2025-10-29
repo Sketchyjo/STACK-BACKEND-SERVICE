@@ -80,6 +80,7 @@ func SetupStackRoutes(db *sql.DB, cfg *config.Config, log *logger.Logger) *gin.E
 		portfolio.Use(middleware.Authentication(cfg, log))
 		{
 			portfolio.GET("", stackHandlers.GetPortfolio)
+			portfolio.GET("/overview", stackHandlers.GetPortfolioOverview)
 		}
 
 		// === WEBHOOK ENDPOINTS (No auth - validated via signature) ===
