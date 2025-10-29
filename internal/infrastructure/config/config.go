@@ -170,10 +170,11 @@ type VerificationConfig struct {
 // AlpacaConfig contains brokerage API configuration
 type AlpacaConfig struct {
 	APIKey      string `mapstructure:"api_key"`
-	APISecret   string `mapstructure:"api_secret"`
+	APISecret   string `mapstructure:"secret_key"`
 	BaseURL     string `mapstructure:"base_url"`
-	Environment string `mapstructure:"environment"` // sandbox or production
-	AccountNo   string `mapstructure:"account_no"`  // Parent account number
+	DataBaseURL string `mapstructure:"data_base_url"` // Market data API base URL
+	Environment string `mapstructure:"environment"`   // sandbox or production
+	Timeout     int    `mapstructure:"timeout"`       // Request timeout in seconds
 }
 
 // ZeroGConfig contains configuration for 0G Network integration

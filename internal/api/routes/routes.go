@@ -58,6 +58,9 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 		container.ZapLog,
 	)
 
+	// Initialize Alpaca handlers
+	alpacaHandlers := handlers.NewAlpacaHandlers(container.AlpacaClient, container.ZapLog)
+
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
@@ -256,6 +259,16 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 				notifications.PUT("/:id/read", handlers.MarkNotificationRead(container.DB, container.Config, container.Logger))
 				notifications.PUT("/read-all", handlers.MarkAllNotificationsRead(container.DB, container.Config, container.Logger))
 				notifications.DELETE("/:id", handlers.DeleteNotification(container.DB, container.Config, container.Logger))
+			}
+
+			// Alpaca Assets - Tradable stocks and ETFs
+			assets := protected.Group("/assets")
+			{
+				assets.GET("/", alpacaHandlers.GetAssets)                      // List all assets with filtering
+				assets.GET("/search", alpacaHandlers.SearchAssets)             // Search assets
+				assets.GET("/popular", alpacaHandlers.GetPopularAssets)       // Get popular/trending assets
+				assets.GET("/exchange/:exchange", alpacaHandlers.GetAssetsByExchange) // Get assets by exchange
+				assets.GET("/:symbol_or_id", alpacaHandlers.GetAsset)         // Get specific asset details
 			}
 		}
 

@@ -18,6 +18,7 @@ import (
 	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
 	"github.com/stack-service/stack_service/internal/domain/services/passcode"
 	"github.com/stack-service/stack_service/internal/domain/services/wallet"
+	"github.com/stack-service/stack_service/internal/adapters/alpaca"
 	"github.com/stack-service/stack_service/internal/infrastructure/adapters"
 	"github.com/stack-service/stack_service/internal/infrastructure/cache"
 	"github.com/stack-service/stack_service/internal/infrastructure/circle"
@@ -96,6 +97,7 @@ type Container struct {
 
 	// External Services
 	CircleClient *circle.Client
+	AlpacaClient *alpaca.Client
 	KYCProvider  *adapters.KYCProvider
 	EmailService *adapters.EmailService
 	SMSService   *adapters.SMSService
@@ -152,6 +154,17 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 		EntitySecretCiphertext: cfg.Circle.EntitySecretCiphertext,
 	}
 	circleClient := circle.NewClient(circleConfig, zapLog)
+
+	// Initialize Alpaca client
+	alpacaConfig := alpaca.Config{
+		APIKey:      cfg.Alpaca.APIKey,
+		APISecret:   cfg.Alpaca.APISecret,
+		BaseURL:     cfg.Alpaca.BaseURL,
+		DataBaseURL: cfg.Alpaca.DataBaseURL,
+		Environment: cfg.Alpaca.Environment,
+		Timeout:     time.Duration(cfg.Alpaca.Timeout) * time.Second,
+	}
+	alpacaClient := alpaca.NewClient(alpacaConfig, zapLog)
 
 	// Initialize KYC provider with full configuration
 	kycProviderConfig := adapters.KYCProviderConfig{
@@ -257,6 +270,7 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 
 		// External Services
 		CircleClient: circleClient,
+		AlpacaClient: alpacaClient,
 		KYCProvider:  kycProvider,
 		EmailService: emailService,
 		SMSService:   smsService,
@@ -355,10 +369,9 @@ func (c *Container) initializeDomainServices() error {
 	orderRepo := repositories.NewOrderRepository(c.DB, c.ZapLog)
 	positionRepo := repositories.NewPositionRepository(c.DB, c.ZapLog)
 
-	// Initialize brokerage adapter (stub for now, will be replaced with Alpaca integration)
+	// Initialize brokerage adapter with Alpaca client
 	brokerageAdapter := adapters.NewBrokerageAdapter(
-		c.Config.Alpaca.APIKey,
-		c.Config.Alpaca.BaseURL,
+		c.AlpacaClient,
 		c.ZapLog,
 	)
 
