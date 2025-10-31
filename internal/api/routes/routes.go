@@ -41,7 +41,13 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 	// investingHandlers := handlers.NewInvestingHandlers(container.GetInvestingService(), container.Logger)
 	onboardingHandlers := handlers.NewOnboardingHandlers(container.GetOnboardingService(), container.ZapLog)
 	walletHandlers := handlers.NewWalletHandlers(container.GetWalletService(), container.ZapLog)
-	securityHandlers := handlers.NewSecurityHandlers(container.GetPasscodeService(), container.GetOnboardingService(), container.ZapLog)
+	securityHandlers := handlers.NewSecurityHandlers(
+		container.GetPasscodeService(),
+		container.GetOnboardingService(),
+		container.UserRepo,
+		container.Config,
+		container.ZapLog,
+	)
 
 	// Initialize AI-CFO and ZeroG handlers
 	aicfoHandlers := handlers.NewAICfoHandler(container.GetAICfoService(), container.ZapLog)
@@ -51,6 +57,9 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 		container.GetNamespaceManager(),
 		container.ZapLog,
 	)
+
+	// Initialize Alpaca handlers
+	alpacaHandlers := handlers.NewAlpacaHandlers(container.AlpacaClient, container.ZapLog)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -236,6 +245,13 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 				analytics.GET("/history", handlers.GetPortfolioHistory(container.DB, container.Config, container.Logger))
 			}
 
+			// Portfolio endpoints (STACK MVP spec compliant)
+			portfolio := protected.Group("/portfolio")
+			{
+				stackHandlers := handlers.NewStackHandlers(container.GetFundingService(), container.GetInvestingService(), container.Logger)
+				portfolio.GET("/overview", stackHandlers.GetPortfolioOverview)
+			}
+
 			// Notifications
 			notifications := protected.Group("/notifications")
 			{
@@ -243,6 +259,16 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 				notifications.PUT("/:id/read", handlers.MarkNotificationRead(container.DB, container.Config, container.Logger))
 				notifications.PUT("/read-all", handlers.MarkAllNotificationsRead(container.DB, container.Config, container.Logger))
 				notifications.DELETE("/:id", handlers.DeleteNotification(container.DB, container.Config, container.Logger))
+			}
+
+			// Alpaca Assets - Tradable stocks and ETFs
+			assets := protected.Group("/assets")
+			{
+				assets.GET("/", alpacaHandlers.GetAssets)                      // List all assets with filtering
+				assets.GET("/search", alpacaHandlers.SearchAssets)             // Search assets
+				assets.GET("/popular", alpacaHandlers.GetPopularAssets)       // Get popular/trending assets
+				assets.GET("/exchange/:exchange", alpacaHandlers.GetAssetsByExchange) // Get assets by exchange
+				assets.GET("/:symbol_or_id", alpacaHandlers.GetAsset)         // Get specific asset details
 			}
 		}
 

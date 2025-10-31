@@ -273,15 +273,16 @@ func NewWalletSetRepository(db *sql.DB, logger *zap.Logger) *WalletSetRepository
 func (r *WalletSetRepository) Create(ctx context.Context, walletSet *entities.WalletSet) error {
 	query := `
 		INSERT INTO wallet_sets (
-			id, name, circle_wallet_set_id, status, created_at, updated_at
+			id, name, circle_wallet_set_id, entity_secret_ciphertext, status, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6
+			$1, $2, $3, $4, $5, $6, $7
 		)`
 
 	_, err := r.db.ExecContext(ctx, query,
 		walletSet.ID,
 		walletSet.Name,
 		walletSet.CircleWalletSetID,
+		walletSet.EntitySecretCiphertext,
 		string(walletSet.Status),
 		walletSet.CreatedAt,
 		walletSet.UpdatedAt,

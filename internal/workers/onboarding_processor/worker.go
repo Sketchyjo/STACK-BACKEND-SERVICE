@@ -310,12 +310,10 @@ func (w *Worker) createWallets(ctx context.Context, job *entities.OnboardingJob,
 		}
 	}
 
-	// Default chains if not specified
+	// Default to SOL-DEVNET if not specified
 	if len(chains) == 0 {
 		chains = []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainSOL,
-			entities.ChainAPTOS,
+			entities.ChainSOLDevnet,
 		}
 	}
 

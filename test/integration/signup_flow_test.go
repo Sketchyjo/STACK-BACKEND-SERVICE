@@ -11,10 +11,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,7 +22,6 @@ import (
 	"github.com/stack-service/stack_service/internal/infrastructure/config"
 	"github.com/stack-service/stack_service/internal/infrastructure/database"
 	"github.com/stack-service/stack_service/internal/infrastructure/di"
-	"github.com/stack-service/stack_service/internal/infrastructure/repositories"
 	"github.com/stack-service/stack_service/pkg/logger"
 )
 
@@ -73,8 +70,8 @@ func TestSignUpFlow(t *testing.T) {
 		},
 		JWT: config.JWTConfig{
 			Secret:     "test-secret-key",
-			AccessTTL:  3600,
-			RefreshTTL: 2592000,
+			AccessTTL:  604800,  // 7 days
+			RefreshTTL: 2592000, // 30 days
 		},
 		Email: config.EmailConfig{
 			Provider:    "",

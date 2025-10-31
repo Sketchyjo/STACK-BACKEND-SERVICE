@@ -9,6 +9,7 @@ import (
 	"github.com/stack-service/stack_service/internal/domain/entities"
 	"github.com/stack-service/stack_service/internal/domain/services/funding"
 	"github.com/stack-service/stack_service/internal/domain/services/investing"
+
 	// "github.com/stack-service/stack_service/internal/infrastructure/config"
 	"github.com/stack-service/stack_service/pkg/logger"
 )
@@ -33,11 +34,39 @@ func NewStackHandlers(
 	}
 }
 
+// checkInvestingServiceAvailable returns true if the investing service is available, otherwise sends error response
+func (h *StackHandlers) checkInvestingServiceAvailable(c *gin.Context) bool {
+	if h.investingService == nil {
+		c.JSON(http.StatusServiceUnavailable, entities.ErrorResponse{
+			Code:    "SERVICE_UNAVAILABLE",
+			Message: "Investing service is not available",
+		})
+		return false
+	}
+	return true
+}
+
+// checkFundingServiceAvailable returns true if the funding service is available, otherwise sends error response
+func (h *StackHandlers) checkFundingServiceAvailable(c *gin.Context) bool {
+	if h.fundingService == nil {
+		c.JSON(http.StatusServiceUnavailable, entities.ErrorResponse{
+			Code:    "SERVICE_UNAVAILABLE",
+			Message: "Funding service is not available",
+		})
+		return false
+	}
+	return true
+}
+
 // === FUNDING ENDPOINTS ===
 
 // CreateDepositAddress generates or retrieves a deposit address for a specific chain
 // POST /funding/deposit/address
 func (h *StackHandlers) CreateDepositAddress(c *gin.Context) {
+	if !h.checkFundingServiceAvailable(c) {
+		return
+	}
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
@@ -73,6 +102,10 @@ func (h *StackHandlers) CreateDepositAddress(c *gin.Context) {
 // ListFundingConfirmations lists recent funding confirmations for the authenticated user
 // GET /funding/confirmations
 func (h *StackHandlers) ListFundingConfirmations(c *gin.Context) {
+	if !h.checkFundingServiceAvailable(c) {
+		return
+	}
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
@@ -123,6 +156,10 @@ func (h *StackHandlers) ListFundingConfirmations(c *gin.Context) {
 // GetBalances returns the user's current balances (buying power, pending, etc.)
 // GET /balances
 func (h *StackHandlers) GetBalances(c *gin.Context) {
+	if !h.checkFundingServiceAvailable(c) {
+		return
+	}
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
@@ -150,6 +187,14 @@ func (h *StackHandlers) GetBalances(c *gin.Context) {
 // ListBaskets returns all curated baskets
 // GET /baskets
 func (h *StackHandlers) ListBaskets(c *gin.Context) {
+	if h.investingService == nil {
+		c.JSON(http.StatusServiceUnavailable, entities.ErrorResponse{
+			Code:    "SERVICE_UNAVAILABLE",
+			Message: "Investing service is not available",
+		})
+		return
+	}
+
 	baskets, err := h.investingService.ListBaskets(c.Request.Context())
 	if err != nil {
 		h.logger.Error("Failed to list baskets", "error", err)
@@ -170,6 +215,10 @@ func (h *StackHandlers) ListBaskets(c *gin.Context) {
 // GetBasket returns a single basket by ID
 // GET /baskets/{id}
 func (h *StackHandlers) GetBasket(c *gin.Context) {
+	if !h.checkInvestingServiceAvailable(c) {
+		return
+	}
+
 	basketIDStr := c.Param("id")
 	basketID, err := uuid.Parse(basketIDStr)
 	if err != nil {
@@ -201,9 +250,13 @@ func (h *StackHandlers) GetBasket(c *gin.Context) {
 	c.JSON(http.StatusOK, basket)
 }
 
-// CreateOrder places a basket order (buy/sell)
+// CreateOrder creates a new buy/sell order
 // POST /orders
 func (h *StackHandlers) CreateOrder(c *gin.Context) {
+	if !h.checkInvestingServiceAvailable(c) {
+		return
+	}
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
@@ -263,9 +316,13 @@ func (h *StackHandlers) CreateOrder(c *gin.Context) {
 	c.JSON(http.StatusCreated, order)
 }
 
-// ListOrders returns orders for the current user
+// ListOrders returns order history for the authenticated user
 // GET /orders
 func (h *StackHandlers) ListOrders(c *gin.Context) {
+	if !h.checkInvestingServiceAvailable(c) {
+		return
+	}
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
@@ -322,6 +379,10 @@ func (h *StackHandlers) ListOrders(c *gin.Context) {
 // GetOrder returns order by ID
 // GET /orders/{id}
 func (h *StackHandlers) GetOrder(c *gin.Context) {
+	if !h.checkInvestingServiceAvailable(c) {
+		return
+	}
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
@@ -365,6 +426,10 @@ func (h *StackHandlers) GetOrder(c *gin.Context) {
 // GetPortfolio returns current portfolio positions and valuations
 // GET /portfolio
 func (h *StackHandlers) GetPortfolio(c *gin.Context) {
+	if !h.checkInvestingServiceAvailable(c) {
+		return
+	}
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
@@ -387,11 +452,44 @@ func (h *StackHandlers) GetPortfolio(c *gin.Context) {
 	c.JSON(http.StatusOK, portfolio)
 }
 
+// GetPortfolioOverview returns comprehensive portfolio overview with balance and performance
+// GET /portfolio/overview
+func (h *StackHandlers) GetPortfolioOverview(c *gin.Context) {
+	if !h.checkInvestingServiceAvailable(c) {
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
+			Code:    "UNAUTHORIZED",
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	overview, err := h.investingService.GetPortfolioOverview(c.Request.Context(), userID.(uuid.UUID))
+	if err != nil {
+		h.logger.Error("Failed to get portfolio overview", "error", err, "user_id", userID)
+		c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+			Code:    "INTERNAL_ERROR",
+			Message: "Failed to retrieve portfolio overview",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, overview)
+}
+
 // === WEBHOOK ENDPOINTS ===
 
 // ChainDepositWebhook handles inbound chain webhook for deposits/confirmations
 // POST /webhooks/chain-deposit
 func (h *StackHandlers) ChainDepositWebhook(c *gin.Context) {
+	if !h.checkFundingServiceAvailable(c) {
+		return
+	}
+
 	var webhook entities.ChainDepositWebhook
 	if err := c.ShouldBindJSON(&webhook); err != nil {
 		h.logger.Error("Invalid chain deposit webhook payload", "error", err)
@@ -417,6 +515,10 @@ func (h *StackHandlers) ChainDepositWebhook(c *gin.Context) {
 // BrokerageFillWebhook handles inbound brokerage fills/exec reports
 // POST /webhooks/brokerage-fills
 func (h *StackHandlers) BrokerageFillWebhook(c *gin.Context) {
+	if !h.checkInvestingServiceAvailable(c) {
+		return
+	}
+
 	var webhook entities.BrokerageFillWebhook
 	if err := c.ShouldBindJSON(&webhook); err != nil {
 		h.logger.Error("Invalid brokerage fill webhook payload", "error", err)

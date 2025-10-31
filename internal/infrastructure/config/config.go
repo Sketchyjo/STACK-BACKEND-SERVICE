@@ -27,6 +27,7 @@ type Config struct {
 	SMS          SMSConfig          `mapstructure:"sms"`
 	Verification VerificationConfig `mapstructure:"verification"`
 	ZeroG        ZeroGConfig        `mapstructure:"zerog"`
+	Alpaca       AlpacaConfig       `mapstructure:"Alpaca"`
 }
 
 type ServerConfig struct {
@@ -121,13 +122,13 @@ type SecurityConfig struct {
 }
 
 type CircleConfig struct {
-	APIKey                     string   `mapstructure:"api_key"`
-	Environment                string   `mapstructure:"environment"` // sandbox or production
-	BaseURL                    string   `mapstructure:"base_url"`
-	EntitySecretCiphertext     string   `mapstructure:"entity_secret_ciphertext"` // Pre-registered ciphertext from Circle Dashboard
-	DefaultWalletSetID         string   `mapstructure:"default_wallet_set_id"`
-	DefaultWalletSetName       string   `mapstructure:"default_wallet_set_name"`
-	SupportedChains            []string `mapstructure:"supported_chains"`
+	APIKey                 string   `mapstructure:"api_key"`
+	Environment            string   `mapstructure:"environment"` // sandbox or production
+	BaseURL                string   `mapstructure:"base_url"`
+	EntitySecretCiphertext string   `mapstructure:"entity_secret_ciphertext"` // Pre-registered ciphertext from Circle Dashboard
+	DefaultWalletSetID     string   `mapstructure:"default_wallet_set_id"`
+	DefaultWalletSetName   string   `mapstructure:"default_wallet_set_name"`
+	SupportedChains        []string `mapstructure:"supported_chains"`
 }
 
 type KYCConfig struct {
@@ -164,6 +165,16 @@ type VerificationConfig struct {
 	CodeTTLMinutes   int `mapstructure:"code_ttl_minutes"`
 	MaxAttempts      int `mapstructure:"max_attempts"`
 	RateLimitPerHour int `mapstructure:"rate_limit_per_hour"`
+}
+
+// AlpacaConfig contains brokerage API configuration
+type AlpacaConfig struct {
+	APIKey      string `mapstructure:"api_key"`
+	APISecret   string `mapstructure:"secret_key"`
+	BaseURL     string `mapstructure:"base_url"`
+	DataBaseURL string `mapstructure:"data_base_url"` // Market data API base URL
+	Environment string `mapstructure:"environment"`   // sandbox or production
+	Timeout     int    `mapstructure:"timeout"`       // Request timeout in seconds
 }
 
 // ZeroGConfig contains configuration for 0G Network integration
@@ -303,7 +314,7 @@ func setDefaults() {
 	viper.SetDefault("redis.db", 0)
 
 	// JWT defaults
-	viper.SetDefault("jwt.access_token_ttl", 3600)     // 1 hour
+	viper.SetDefault("jwt.access_token_ttl", 604800)   // 7 days
 	viper.SetDefault("jwt.refresh_token_ttl", 2592000) // 30 days
 	viper.SetDefault("jwt.issuer", "stack_service")
 
@@ -319,7 +330,7 @@ func setDefaults() {
 	viper.SetDefault("circle.base_url", "")
 	viper.SetDefault("circle.default_wallet_set_id", "")
 	viper.SetDefault("circle.default_wallet_set_name", "STACK-WalletSet")
-	viper.SetDefault("circle.supported_chains", []string{"ETH", "MATIC", "SOL", "BASE"})
+	viper.SetDefault("circle.supported_chains", []string{"SOL-DEVNET"})
 
 	// KYC defaults
 	viper.SetDefault("kyc.provider", "")
@@ -378,6 +389,10 @@ func setDefaults() {
 	viper.SetDefault("zerog.compute.funding.min_balance", 10.0)
 	viper.SetDefault("zerog.compute.funding.topup_amount", 50.0)
 	viper.SetDefault("zerog.compute.funding.max_account_limit", 1000.0)
+
+	// Alpaca defaults
+	viper.SetDefault("Alpaca.environment", "sandbox")
+	viper.SetDefault("Alpaca.base_url", "https://api.Alpaca.io")
 }
 
 func overrideFromEnv() {
@@ -524,6 +539,23 @@ func overrideFromEnv() {
 	}
 	if zeroGProviderID := os.Getenv("ZEROG_COMPUTE_PROVIDER_ID"); zeroGProviderID != "" {
 		viper.Set("zerog.compute.provider_id", zeroGProviderID)
+	}
+
+	// Alpaca
+	if dwAPIKey := os.Getenv("Alpaca_API_KEY"); dwAPIKey != "" {
+		viper.Set("Alpaca.api_key", dwAPIKey)
+	}
+	if dwAPISecret := os.Getenv("Alpaca_API_SECRET"); dwAPISecret != "" {
+		viper.Set("Alpaca.api_secret", dwAPISecret)
+	}
+	if dwBaseURL := os.Getenv("Alpaca_BASE_URL"); dwBaseURL != "" {
+		viper.Set("Alpaca.base_url", dwBaseURL)
+	}
+	if dwEnvironment := os.Getenv("Alpaca_ENVIRONMENT"); dwEnvironment != "" {
+		viper.Set("Alpaca.environment", dwEnvironment)
+	}
+	if dwAccountNo := os.Getenv("Alpaca_ACCOUNT_NO"); dwAccountNo != "" {
+		viper.Set("Alpaca.account_no", dwAccountNo)
 	}
 }
 

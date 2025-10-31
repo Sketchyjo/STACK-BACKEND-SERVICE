@@ -12,20 +12,33 @@ import (
 	"github.com/stack-service/stack_service/internal/domain/entities"
 	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
 	"github.com/stack-service/stack_service/internal/domain/services/passcode"
+	"github.com/stack-service/stack_service/internal/infrastructure/config"
+	"github.com/stack-service/stack_service/internal/infrastructure/repositories"
+	"github.com/stack-service/stack_service/pkg/auth"
 )
 
 // SecurityHandlers manages sensitive security endpoints such as passcodes
 type SecurityHandlers struct {
 	passcodeService   *passcode.Service
 	onboardingService *onboarding.Service
+	userRepo          *repositories.UserRepository
+	config            *config.Config
 	logger            *zap.Logger
 }
 
 // NewSecurityHandlers constructs SecurityHandlers
-func NewSecurityHandlers(passcodeService *passcode.Service, onboardingService *onboarding.Service, logger *zap.Logger) *SecurityHandlers {
+func NewSecurityHandlers(
+	passcodeService *passcode.Service,
+	onboardingService *onboarding.Service,
+	userRepo *repositories.UserRepository,
+	cfg *config.Config,
+	logger *zap.Logger,
+) *SecurityHandlers {
 	return &SecurityHandlers{
 		passcodeService:   passcodeService,
 		onboardingService: onboardingService,
+		userRepo:          userRepo,
+		config:            cfg,
 		logger:            logger,
 	}
 }
@@ -162,7 +175,7 @@ func (h *SecurityHandlers) UpdatePasscode(c *gin.Context) {
 	})
 }
 
-// VerifyPasscode validates the passcode and issues a short-lived session token
+// VerifyPasscode validates the passcode and issues JWT tokens (access and refresh)
 func (h *SecurityHandlers) VerifyPasscode(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -178,7 +191,8 @@ func (h *SecurityHandlers) VerifyPasscode(c *gin.Context) {
 		return
 	}
 
-	response, err := h.passcodeService.VerifyPasscode(ctx, userID, req.Passcode)
+	// Verify the passcode and create a session token for sensitive operations
+	passcodeSessionToken, passcodeSessionExpiresAt, err := h.passcodeService.VerifyPasscode(ctx, userID, req.Passcode)
 	if err != nil {
 		switch {
 		case err == passcode.ErrPasscodeNotSet:
@@ -195,6 +209,48 @@ func (h *SecurityHandlers) VerifyPasscode(c *gin.Context) {
 			h.respondWithInternalError(c, "PASSCODE_VERIFY_FAILED", "Failed to verify passcode")
 		}
 		return
+	}
+
+	// Get user information for token generation
+	user, err := h.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		h.logger.Error("Failed to fetch user information after passcode verification",
+			zap.Error(err),
+			zap.String("user_id", userID.String()),
+			zap.String("request_id", getRequestID(c)))
+		h.respondWithInternalError(c, "USER_FETCH_FAILED", "Failed to fetch user information")
+		return
+	}
+
+	// Generate JWT tokens (access and refresh)
+	tokens, err := auth.GenerateTokenPair(
+		user.ID,
+		user.Email,
+		"user", // Default role for regular users
+		h.config.JWT.Secret,
+		h.config.JWT.AccessTTL,
+		h.config.JWT.RefreshTTL,
+	)
+	if err != nil {
+		h.logger.Error("Failed to generate tokens after passcode verification",
+			zap.Error(err),
+			zap.String("user_id", userID.String()),
+			zap.String("request_id", getRequestID(c)))
+		h.respondWithInternalError(c, "TOKEN_GENERATION_FAILED", "Failed to generate authentication tokens")
+		return
+	}
+
+	h.logger.Info("Passcode verified and tokens issued",
+		zap.String("user_id", userID.String()),
+		zap.String("request_id", getRequestID(c)))
+
+	response := entities.PasscodeVerificationResponse{
+		Verified:                 true,
+		AccessToken:              tokens.AccessToken,
+		RefreshToken:             tokens.RefreshToken,
+		ExpiresAt:                tokens.ExpiresAt,
+		PasscodeSessionToken:     passcodeSessionToken,
+		PasscodeSessionExpiresAt: passcodeSessionExpiresAt,
 	}
 
 	c.JSON(http.StatusOK, response)
