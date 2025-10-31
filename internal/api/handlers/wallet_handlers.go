@@ -439,7 +439,7 @@ func (h *WalletHandlers) InitiateWalletCreation(c *gin.Context) {
 	}
 
 	// Get user ID from context (set by auth middleware)
-	userIDStr, exists := c.Get("user_id")
+	userIDValue, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, entities.ErrorResponse{
 			Code:    "UNAUTHORIZED",
@@ -448,9 +448,24 @@ func (h *WalletHandlers) InitiateWalletCreation(c *gin.Context) {
 		return
 	}
 
-	userID, err := uuid.Parse(userIDStr.(string))
-	if err != nil {
-		h.logger.Error("Invalid user ID in context", zap.Error(err))
+	// Handle both uuid.UUID and string types
+	var userID uuid.UUID
+	var err error
+	switch v := userIDValue.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, err = uuid.Parse(v)
+		if err != nil {
+			h.logger.Error("Invalid user ID string in context", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
+				Code:    "INTERNAL_ERROR",
+				Message: "Invalid user context",
+			})
+			return
+		}
+	default:
+		h.logger.Error("Unexpected user ID type in context", zap.Any("type", v))
 		c.JSON(http.StatusInternalServerError, entities.ErrorResponse{
 			Code:    "INTERNAL_ERROR",
 			Message: "Invalid user context",
@@ -458,12 +473,10 @@ func (h *WalletHandlers) InitiateWalletCreation(c *gin.Context) {
 		return
 	}
 
-	// Default to testnet chains if not specified
+	// Default to SOL-DEVNET if not specified
 	chains := req.Chains
 	if len(chains) == 0 {
-		// Default testnet chains: SOL-DEVNET, APTOS-TESTNET, MATIC-AMOY, BASE-SEPOLIA
-		chains = []string{string(entities.ChainSOLDevnet), string(entities.ChainAPTOSTestnet),
-			string(entities.ChainMATICAmoy), string(entities.ChainBASESepolia)}
+		chains = []string{string(entities.ChainSOLDevnet)}
 	}
 
 	// Validate chains - ensure only testnet chains
@@ -476,7 +489,7 @@ func (h *WalletHandlers) InitiateWalletCreation(c *gin.Context) {
 				Message: "Invalid blockchain network",
 				Details: map[string]interface{}{
 					"chain":            chainStr,
-					"supported_chains": []string{"SOL-DEVNET", "APTOS-TESTNET", "MATIC-AMOY", "BASE-SEPOLIA"},
+					"supported_chains": []string{"SOL-DEVNET"},
 				},
 			})
 			return
@@ -487,10 +500,10 @@ func (h *WalletHandlers) InitiateWalletCreation(c *gin.Context) {
 			h.logger.Warn("Mainnet chain not supported for wallet creation", zap.String("chain", chainStr))
 			c.JSON(http.StatusBadRequest, entities.ErrorResponse{
 				Code:    "MAINNET_NOT_SUPPORTED",
-				Message: "Only testnet chains are supported at this time",
+				Message: "Only SOL-DEVNET is supported at this time",
 				Details: map[string]interface{}{
 					"requested_chain":  chainStr,
-					"supported_chains": []string{"SOL-DEVNET", "APTOS-TESTNET", "MATIC-AMOY", "BASE-SEPOLIA"},
+					"supported_chains": []string{"SOL-DEVNET"},
 				},
 			})
 			return
@@ -584,7 +597,7 @@ func (h *WalletHandlers) ProvisionWallets(c *gin.Context) {
 	}
 
 	// Get user ID from context (set by auth middleware)
-	userIDStr, exists := c.Get("user_id")
+	userIDValue, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "UNAUTHORIZED",
@@ -593,9 +606,24 @@ func (h *WalletHandlers) ProvisionWallets(c *gin.Context) {
 		return
 	}
 
-	userID, err := uuid.Parse(userIDStr.(string))
-	if err != nil {
-		h.logger.Error("Invalid user ID in context", zap.Error(err))
+	// Handle both uuid.UUID and string types
+	var userID uuid.UUID
+	var err error
+	switch v := userIDValue.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, err = uuid.Parse(v)
+		if err != nil {
+			h.logger.Error("Invalid user ID string in context", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "INTERNAL_ERROR",
+				"message": "Invalid user context",
+			})
+			return
+		}
+	default:
+		h.logger.Error("Unexpected user ID type in context", zap.Any("type", v))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "INTERNAL_ERROR",
 			"message": "Invalid user context",
@@ -688,7 +716,7 @@ func (h *WalletHandlers) GetWalletByChain(c *gin.Context) {
 	}
 
 	// Get user ID from context
-	userIDStr, exists := c.Get("user_id")
+	userIDValue, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "UNAUTHORIZED",
@@ -697,9 +725,24 @@ func (h *WalletHandlers) GetWalletByChain(c *gin.Context) {
 		return
 	}
 
-	userID, err := uuid.Parse(userIDStr.(string))
-	if err != nil {
-		h.logger.Error("Invalid user ID in context", zap.Error(err))
+	// Handle both uuid.UUID and string types
+	var userID uuid.UUID
+	var err error
+	switch v := userIDValue.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, err = uuid.Parse(v)
+		if err != nil {
+			h.logger.Error("Invalid user ID string in context", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "INTERNAL_ERROR",
+				"message": "Invalid user context",
+			})
+			return
+		}
+	default:
+		h.logger.Error("Unexpected user ID type in context", zap.Any("type", v))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "INTERNAL_ERROR",
 			"message": "Invalid user context",

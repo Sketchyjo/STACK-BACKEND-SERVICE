@@ -18,6 +18,8 @@ type Service struct {
 	provisioningJobRepo WalletProvisioningJobRepository
 	circleClient        CircleClient
 	auditService        AuditService
+	entitySecretService EntitySecretService
+	onboardingService   OnboardingService
 	logger              *zap.Logger
 	config              Config
 }
@@ -72,6 +74,14 @@ type AuditService interface {
 	LogWalletEvent(ctx context.Context, userID uuid.UUID, action, entity string, before, after interface{}) error
 }
 
+type EntitySecretService interface {
+	GenerateEntitySecretCiphertext(ctx context.Context) (string, error)
+}
+
+type OnboardingService interface {
+	ProcessWalletCreationComplete(ctx context.Context, userID uuid.UUID) error
+}
+
 // NewService creates a new wallet service
 func NewService(
 	walletRepo WalletRepository,
@@ -79,6 +89,8 @@ func NewService(
 	provisioningJobRepo WalletProvisioningJobRepository,
 	circleClient CircleClient,
 	auditService AuditService,
+	entitySecretService EntitySecretService,
+	onboardingService OnboardingService,
 	logger *zap.Logger,
 	cfg Config,
 ) *Service {
@@ -97,18 +109,22 @@ func NewService(
 		provisioningJobRepo: provisioningJobRepo,
 		circleClient:        circleClient,
 		auditService:        auditService,
+		entitySecretService: entitySecretService,
+		onboardingService:   onboardingService,
 		logger:              logger,
 		config:              cfg,
 	}
 }
 
+// SetOnboardingService sets the onboarding service (for dependency injection after creation)
+func (s *Service) SetOnboardingService(onboardingService OnboardingService) {
+	s.onboardingService = onboardingService
+}
+
 func normalizeSupportedChains(chains []entities.WalletChain, logger *zap.Logger) []entities.WalletChain {
 	if len(chains) == 0 {
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainSOLDevnet,
 		}
 	}
 
@@ -129,10 +145,7 @@ func normalizeSupportedChains(chains []entities.WalletChain, logger *zap.Logger)
 
 	if len(normalized) == 0 {
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainSOLDevnet,
 		}
 	}
 
@@ -257,11 +270,16 @@ func (s *Service) ProcessWalletProvisioningJob(ctx context.Context, jobID uuid.U
 			zap.Int("walletCount", successCount))
 
 		// Trigger onboarding completion callback
-		// This would typically be done via an event bus or message queue
-		// For now, we'll log it for the onboarding service to pick up
-		s.logger.Info("Wallet provisioning completed",
-			zap.String("userID", job.UserID.String()),
-			zap.String("event", "wallet_provisioning_completed"))
+		if s.onboardingService != nil {
+			if err := s.onboardingService.ProcessWalletCreationComplete(ctx, job.UserID); err != nil {
+				s.logger.Warn("Failed to process wallet creation complete in onboarding service",
+					zap.Error(err),
+					zap.String("userID", job.UserID.String()))
+			} else {
+				s.logger.Info("Wallet provisioning completed and onboarding status updated",
+					zap.String("userID", job.UserID.String()))
+			}
+		}
 
 	} else if successCount > 0 {
 		// Partial success - mark as failed but note partial success
@@ -506,14 +524,21 @@ func (s *Service) ensureWalletSet(ctx context.Context) (*entities.WalletSet, err
 		return nil, fmt.Errorf("failed to create Circle wallet set: %w", err)
 	}
 
+	// Generate entity secret ciphertext for the wallet set
+	entitySecretCiphertext, err := s.entitySecretService.GenerateEntitySecretCiphertext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate entity secret ciphertext: %w", err)
+	}
+
 	// Create wallet set record
 	walletSet = &entities.WalletSet{
-		ID:                uuid.New(),
-		Name:              setName,
-		CircleWalletSetID: circleResp.WalletSet.ID,
-		Status:            entities.WalletSetStatusActive,
-		CreatedAt:         time.Now(),
-		UpdatedAt:         time.Now(),
+		ID:                     uuid.New(),
+		Name:                   setName,
+		CircleWalletSetID:      circleResp.WalletSet.ID,
+		EntitySecretCiphertext: entitySecretCiphertext,
+		Status:                 entities.WalletSetStatusActive,
+		CreatedAt:              time.Now(),
+		UpdatedAt:              time.Now(),
 	}
 
 	if err := s.walletSetRepo.Create(ctx, walletSet); err != nil {
@@ -639,7 +664,7 @@ func (s *Service) HealthCheck(ctx context.Context) error {
 
 	// Check Circle client health
 	if err := s.circleClient.HealthCheck(ctx); err != nil {
-		return fmt.Errorf("Circle client health check failed: %w", err)
+		return fmt.Errorf("circle client health check failed: %w", err)
 	}
 
 	// Check if we can access the wallet set

@@ -51,7 +51,7 @@ func TestWalletAPI(t *testing.T) {
 		},
 		JWT: config.JWTConfig{
 			Secret:     "test-secret-key-for-jwt-token-generation",
-			AccessTTL:  900,    // 15 minutes in seconds
+			AccessTTL:  604800, // 7 days in seconds
 			RefreshTTL: 604800, // 7 days in seconds
 		},
 		Environment: "test",

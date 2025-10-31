@@ -11,6 +11,16 @@ import (
 	"github.com/stack-service/stack_service/pkg/logger"
 )
 
+// WalletBalanceProvider interface for fetching real-time wallet balances
+type WalletBalanceProvider interface {
+	GetByUserID(ctx context.Context, userID uuid.UUID) ([]*entities.ManagedWallet, error)
+}
+
+// CircleClient interface for fetching wallet balances from Circle
+type CircleClient interface {
+	GetWalletBalances(ctx context.Context, walletID string, tokenAddress ...string) (*entities.CircleWalletBalancesResponse, error)
+}
+
 // Service handles investing operations - baskets, orders, portfolio management
 type Service struct {
 	basketRepo   BasketRepository
@@ -18,6 +28,8 @@ type Service struct {
 	positionRepo PositionRepository
 	balanceRepo  BalanceRepository
 	brokerageAPI BrokerageAdapter
+	walletRepo   WalletBalanceProvider
+	circleClient CircleClient
 	logger       *logger.Logger
 }
 
@@ -75,6 +87,8 @@ func NewService(
 	positionRepo PositionRepository,
 	balanceRepo BalanceRepository,
 	brokerageAPI BrokerageAdapter,
+	walletRepo WalletBalanceProvider,
+	circleClient CircleClient,
 	logger *logger.Logger,
 ) *Service {
 	return &Service{
@@ -83,6 +97,8 @@ func NewService(
 		positionRepo: positionRepo,
 		balanceRepo:  balanceRepo,
 		brokerageAPI: brokerageAPI,
+		walletRepo:   walletRepo,
+		circleClient: circleClient,
 		logger:       logger,
 	}
 }
@@ -247,6 +263,135 @@ func (s *Service) GetPortfolio(ctx context.Context, userID uuid.UUID) (*entities
 		Currency:   "USD",
 		Positions:  portfolioPositions,
 		TotalValue: totalValue.String(),
+	}, nil
+}
+
+// GetPortfolioOverview returns comprehensive portfolio overview with balance and performance
+// This method fetches real-time balance data, so it reflects immediate updates from funding operations
+func (s *Service) GetPortfolioOverview(ctx context.Context, userID uuid.UUID) (*entities.PortfolioOverview, error) {
+	if s.positionRepo == nil || s.balanceRepo == nil {
+		return nil, fmt.Errorf("service dependencies not initialized")
+	}
+
+	// Get positions
+	positions, err := s.positionRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get positions: %w", err)
+	}
+
+	// Calculate total positions value
+	positionsValue := decimal.Zero
+	for _, position := range positions {
+		positionsValue = positionsValue.Add(position.MarketValue)
+	}
+
+	// Fetch real-time Circle wallet balances
+	var totalUSDCBalance decimal.Decimal
+	if s.walletRepo != nil && s.circleClient != nil {
+		wallets, err := s.walletRepo.GetByUserID(ctx, userID)
+		if err == nil && len(wallets) > 0 {
+			for _, wallet := range wallets {
+				// Get USDC token address for this wallet's chain
+				usdcTokenAddress := wallet.Chain.GetUSDCTokenAddress()
+				if usdcTokenAddress == "" {
+					s.logger.Warn("No USDC token address configured for chain",
+						"wallet_id", wallet.CircleWalletID,
+						"chain", wallet.Chain)
+					continue
+				}
+				
+				// Fetch balance from Circle API for each wallet, filtering by USDC token address
+				balancesResp, err := s.circleClient.GetWalletBalances(ctx, wallet.CircleWalletID, usdcTokenAddress)
+				if err != nil {
+					s.logger.Warn("Failed to fetch Circle balance with token filter",
+						"wallet_id", wallet.CircleWalletID,
+						"chain", wallet.Chain,
+
+						"token_address", usdcTokenAddress,
+						"error", err)
+				}
+
+					// Console.log equivalent in Go (using Info level)
+	s.logger.Info("GetPortfolioOverview result balance",
+		"balance", balancesResp,
+	)
+				
+				// Log all token balances for debugging
+				if len(balancesResp.TokenBalances) == 0 {
+					s.logger.Debug("No token balances found for wallet",
+						"wallet_id", wallet.CircleWalletID,
+						"chain", wallet.Chain)
+				} else {
+					for _, tb := range balancesResp.TokenBalances {
+						s.logger.Debug("Found token balance",
+							"wallet_id", wallet.CircleWalletID,
+							"token_symbol", tb.Token.Symbol,
+							"token_address", tb.Token.TokenAddress,
+							"amount", tb.Amount)
+					}
+				}
+				
+				// Extract USDC balance
+				usdcBalanceStr := balancesResp.GetUSDCBalance()
+				if usdcBalance, err := decimal.NewFromString(usdcBalanceStr); err == nil {
+					if usdcBalance.GreaterThan(decimal.Zero) {
+						totalUSDCBalance = totalUSDCBalance.Add(usdcBalance)
+						s.logger.Debug("Fetched Circle wallet balance",
+							"wallet_id", wallet.CircleWalletID,
+							"chain", wallet.Chain,
+							"token_address", usdcTokenAddress,
+							"usdc_balance", usdcBalanceStr)
+					}
+				}
+			}
+		}
+	}
+	
+	// Get database balance (buying power) as fallback
+	balance, err := s.balanceRepo.Get(ctx, userID)
+	if err != nil {
+		// If balance doesn't exist yet (new user), use zero
+		s.logger.Debug("Balance not found for user, using zero", "user_id", userID)
+		balance = &entities.Balance{
+			BuyingPower: decimal.Zero,
+			Currency:    "USD",
+			UpdatedAt:   time.Now(),
+		}
+	}
+	
+	// Add Circle USDC balance to database buying power
+	// (USDC is 1:1 with USD buying power)
+	buyingPower := balance.BuyingPower.Add(totalUSDCBalance)
+
+	// Calculate total portfolio (positions + buying power)
+	totalPortfolio := positionsValue.Add(buyingPower)
+
+	// Calculate performance (30-day)
+	// For now, we'll use a simple calculation: (current value - invested amount) / invested amount
+	// In production, you'd query portfolio_performance table for historical data
+	performance := 0.0
+	totalInvested := decimal.Zero
+	for _, position := range positions {
+		// Invested amount = quantity * avg price
+		invested := position.Quantity.Mul(position.AvgPrice)
+		totalInvested = totalInvested.Add(invested)
+	}
+
+	if totalInvested.GreaterThan(decimal.Zero) {
+		gain := positionsValue.Sub(totalInvested)
+		performanceDecimal := gain.Div(totalInvested).Mul(decimal.NewFromInt(100))
+		performance, _ = performanceDecimal.Float64()
+	}
+
+
+
+	return &entities.PortfolioOverview{
+		TotalPortfolio:     totalPortfolio.StringFixed(2),
+		BuyingPower:        buyingPower.StringFixed(2),
+		PositionsValue:     positionsValue.StringFixed(2),
+		PerformanceLast30d: performance,
+		Currency:           "USD",
+		LastUpdated:        time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }
 

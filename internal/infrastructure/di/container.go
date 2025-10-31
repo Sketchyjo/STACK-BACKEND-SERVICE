@@ -12,11 +12,13 @@ import (
 	"github.com/stack-service/stack_service/internal/domain/entities"
 	domainrepos "github.com/stack-service/stack_service/internal/domain/repositories"
 	"github.com/stack-service/stack_service/internal/domain/services"
+	entitysecret "github.com/stack-service/stack_service/internal/domain/services/entity_secret"
 	"github.com/stack-service/stack_service/internal/domain/services/funding"
 	"github.com/stack-service/stack_service/internal/domain/services/investing"
 	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
 	"github.com/stack-service/stack_service/internal/domain/services/passcode"
 	"github.com/stack-service/stack_service/internal/domain/services/wallet"
+	"github.com/stack-service/stack_service/internal/adapters/alpaca"
 	"github.com/stack-service/stack_service/internal/infrastructure/adapters"
 	"github.com/stack-service/stack_service/internal/infrastructure/cache"
 	"github.com/stack-service/stack_service/internal/infrastructure/circle"
@@ -55,6 +57,10 @@ func (a *CircleAdapter) ConvertToUSD(ctx context.Context, amount decimal.Decimal
 	return amount, nil
 }
 
+func (a *CircleAdapter) GetWalletBalances(ctx context.Context, walletID string, tokenAddress ...string) (*entities.CircleWalletBalancesResponse, error) {
+	return a.client.GetWalletBalances(ctx, walletID, tokenAddress...)
+}
+
 func (a *AISummariesRepositoryAdapter) CreateSummary(ctx context.Context, summary *services.AISummary) error {
 	return a.repo.Create(ctx, summary)
 }
@@ -91,6 +97,7 @@ type Container struct {
 
 	// External Services
 	CircleClient *circle.Client
+	AlpacaClient *alpaca.Client
 	KYCProvider  *adapters.KYCProvider
 	EmailService *adapters.EmailService
 	SMSService   *adapters.SMSService
@@ -106,6 +113,7 @@ type Container struct {
 	FundingService       *funding.Service
 	InvestingService     *investing.Service
 	AICfoService         *services.AICfoService
+	EntitySecretService  *entitysecret.Service
 
 	// ZeroG Services
 	InferenceGateway *zerog.InferenceGateway
@@ -146,6 +154,17 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 		EntitySecretCiphertext: cfg.Circle.EntitySecretCiphertext,
 	}
 	circleClient := circle.NewClient(circleConfig, zapLog)
+
+	// Initialize Alpaca client
+	alpacaConfig := alpaca.Config{
+		APIKey:      cfg.Alpaca.APIKey,
+		APISecret:   cfg.Alpaca.APISecret,
+		BaseURL:     cfg.Alpaca.BaseURL,
+		DataBaseURL: cfg.Alpaca.DataBaseURL,
+		Environment: cfg.Alpaca.Environment,
+		Timeout:     time.Duration(cfg.Alpaca.Timeout) * time.Second,
+	}
+	alpacaClient := alpaca.NewClient(alpacaConfig, zapLog)
 
 	// Initialize KYC provider with full configuration
 	kycProviderConfig := adapters.KYCProviderConfig{
@@ -214,6 +233,9 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 
 	auditService := adapters.NewAuditService(db, zapLog)
 
+	// Initialize entity secret service
+	entitySecretService := entitysecret.NewService(zapLog)
+
 	// Initialize ZeroG services
 	storageClient, err := zerog.NewStorageClient(&cfg.ZeroG.Storage, zapLog)
 	if err != nil {
@@ -248,6 +270,7 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 
 		// External Services
 		CircleClient: circleClient,
+		AlpacaClient: alpacaClient,
 		KYCProvider:  kycProvider,
 		EmailService: emailService,
 		SMSService:   smsService,
@@ -258,6 +281,9 @@ func NewContainer(cfg *config.Config, db *sql.DB, log *logger.Logger) (*Containe
 		InferenceGateway: inferenceGateway,
 		StorageClient:    storageClient,
 		NamespaceManager: namespaceManager,
+
+		// Entity Secret Service
+		EntitySecretService: entitySecretService,
 	}
 
 	// Initialize domain services with their dependencies
@@ -295,6 +321,8 @@ func (c *Container) initializeDomainServices() error {
 		c.WalletProvisioningJobRepo,
 		c.CircleClient,
 		c.AuditService,
+		c.EntitySecretService,
+		nil, // onboardingService - will be set after onboarding service is created
 		c.ZapLog,
 		walletServiceConfig,
 	)
@@ -312,6 +340,9 @@ func (c *Container) initializeDomainServices() error {
 		append([]entities.WalletChain(nil), walletServiceConfig.SupportedChains...),
 	)
 
+	// Inject onboarding service back into wallet service to complete circular dependency
+	c.WalletService.SetOnboardingService(c.OnboardingService)
+
 	// Initialize passcode service for transaction security
 	c.PasscodeService = passcode.NewService(
 		c.UserRepo,
@@ -328,13 +359,32 @@ func (c *Container) initializeDomainServices() error {
 		c.DepositRepo,
 		c.BalanceRepo,
 		simpleWalletRepo,
+		c.WalletRepo, // ManagedWalletRepository for real-time Circle balance fetching
 		circleAdapter,
 		c.Logger,
 	)
 
-	// Initialize investing service (placeholder - no dependencies defined yet)
-	// TODO: Wire up investing service dependencies when implemented
-	c.InvestingService = nil
+	// Initialize investing service with repositories
+	basketRepo := repositories.NewBasketRepository(c.DB, c.ZapLog)
+	orderRepo := repositories.NewOrderRepository(c.DB, c.ZapLog)
+	positionRepo := repositories.NewPositionRepository(c.DB, c.ZapLog)
+
+	// Initialize brokerage adapter with Alpaca client
+	brokerageAdapter := adapters.NewBrokerageAdapter(
+		c.AlpacaClient,
+		c.ZapLog,
+	)
+
+	c.InvestingService = investing.NewService(
+		basketRepo,
+		orderRepo,
+		positionRepo,
+		c.BalanceRepo,
+		brokerageAdapter,
+		c.WalletRepo,   // Pass wallet repository for fetching wallets
+		c.CircleClient, // Pass Circle client for fetching real-time balances
+		c.Logger,
+	)
 
 	// Initialize notification service for AI-CFO
 	notificationService, err := services.NewNotificationService(c.EmailService, c.ZapLog)
@@ -423,12 +473,9 @@ func (c *Container) GetOnboardingJobService() *services.OnboardingJobService {
 
 func convertWalletChains(raw []string, logger *zap.Logger) []entities.WalletChain {
 	if len(raw) == 0 {
-		logger.Warn("circle.supported_chains not configured; defaulting to ETH/MATIC/SOL/BASE")
+		logger.Warn("circle.supported_chains not configured; defaulting to SOL-DEVNET")
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainSOLDevnet,
 		}
 	}
 
@@ -452,12 +499,9 @@ func convertWalletChains(raw []string, logger *zap.Logger) []entities.WalletChai
 	}
 
 	if len(normalized) == 0 {
-		logger.Warn("circle.supported_chains contained no valid entries; defaulting to ETH/MATIC/SOL/BASE")
+		logger.Warn("circle.supported_chains contained no valid entries; defaulting to SOL-DEVNET")
 		return []entities.WalletChain{
-			entities.ChainETH,
-			entities.ChainMATIC,
-			entities.ChainSOL,
-			entities.ChainBASE,
+			entities.ChainSOLDevnet,
 		}
 	}
 
