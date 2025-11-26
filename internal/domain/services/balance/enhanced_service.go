@@ -55,7 +55,7 @@ func (s *EnhancedService) GetBalance(ctx context.Context, userID uuid.UUID) (*Ba
 		PendingInvestment: ledgerBalance.PendingInvestment,
 		TotalValue:        ledgerBalance.TotalValue,
 		Currency:          "USD",
-		
+
 		// Detailed breakdown
 		Breakdown: &BalanceBreakdown{
 			AvailableUSDC:     ledgerBalance.USDCBalance,
@@ -99,12 +99,8 @@ func (s *EnhancedService) GetDetailedBalance(
 				"error", err)
 			// Don't fail, just use ledger data
 		} else {
-			if equity, err := decimal.NewFromString(alpacaResp.Equity); err == nil {
-				alpacaEquity = equity
-			}
-			if portfolio, err := decimal.NewFromString(alpacaResp.PortfolioValue); err == nil {
-				positionsValue = portfolio
-			}
+			alpacaEquity = alpacaResp.Equity
+			positionsValue = alpacaResp.PortfolioValue
 		}
 	}
 
@@ -117,7 +113,7 @@ func (s *EnhancedService) GetDetailedBalance(
 		InvestedValue:       positionsValue,
 		TotalPortfolioValue: baseBalance.TotalValue.Add(positionsValue),
 		Currency:            "USD",
-		
+
 		AlpacaAccountDetails: &AlpacaAccountDetails{
 			AccountID:      alpacaAccountID,
 			Equity:         alpacaEquity,
@@ -187,13 +183,13 @@ type BalanceBreakdown struct {
 
 // DetailedBalanceResponse includes positions and Alpaca details
 type DetailedBalanceResponse struct {
-	UserID              uuid.UUID            `json:"user_id"`
-	USDCBalance         decimal.Decimal      `json:"usdc_balance"`
-	BuyingPower         decimal.Decimal      `json:"buying_power"`
-	PendingInvestment   decimal.Decimal      `json:"pending_investment"`
-	InvestedValue       decimal.Decimal      `json:"invested_value"`
-	TotalPortfolioValue decimal.Decimal      `json:"total_portfolio_value"`
-	Currency            string               `json:"currency"`
+	UserID               uuid.UUID             `json:"user_id"`
+	USDCBalance          decimal.Decimal       `json:"usdc_balance"`
+	BuyingPower          decimal.Decimal       `json:"buying_power"`
+	PendingInvestment    decimal.Decimal       `json:"pending_investment"`
+	InvestedValue        decimal.Decimal       `json:"invested_value"`
+	TotalPortfolioValue  decimal.Decimal       `json:"total_portfolio_value"`
+	Currency             string                `json:"currency"`
 	AlpacaAccountDetails *AlpacaAccountDetails `json:"alpaca_details,omitempty"`
 }
 

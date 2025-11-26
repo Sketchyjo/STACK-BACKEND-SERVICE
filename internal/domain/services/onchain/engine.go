@@ -14,9 +14,16 @@ import (
 	"github.com/stack-service/stack_service/pkg/logger"
 )
 
+// AllocationService defines the interface for allocation operations
+type AllocationService interface {
+	GetMode(ctx context.Context, userID uuid.UUID) (*entities.SmartAllocationMode, error)
+	ProcessIncomingFunds(ctx context.Context, req *entities.IncomingFundsRequest) error
+}
+
 // Engine handles all blockchain and Circle wallet interactions
 type Engine struct {
 	ledgerService      *ledger.Service
+	allocationService  AllocationService
 	circleClient       *circle.Client
 	depositRepo        DepositRepository
 	withdrawalRepo     WithdrawalRepository
@@ -76,6 +83,7 @@ type ManagedWalletRepository interface {
 // NewEngine creates a new onchain engine
 func NewEngine(
 	ledgerService *ledger.Service,
+	allocationService AllocationService,
 	circleClient *circle.Client,
 	depositRepo DepositRepository,
 	withdrawalRepo WithdrawalRepository,
@@ -90,6 +98,7 @@ func NewEngine(
 
 	return &Engine{
 		ledgerService:     ledgerService,
+		allocationService: allocationService,
 		circleClient:      circleClient,
 		depositRepo:       depositRepo,
 		withdrawalRepo:    withdrawalRepo,
@@ -199,12 +208,60 @@ func (e *Engine) ProcessDeposit(ctx context.Context, req *DepositRequest) error 
 }
 
 // postDepositLedgerEntries creates ledger entries for a deposit
-// Credit user's usdc_balance, Debit system_buffer_usdc
+// Checks for allocation mode and splits funds 70/30 if active, otherwise uses legacy flow
 func (e *Engine) postDepositLedgerEntries(ctx context.Context, deposit *entities.Deposit) error {
 	e.logger.Info("Posting deposit ledger entries",
 		"deposit_id", deposit.ID,
 		"user_id", deposit.UserID,
 		"amount", deposit.Amount)
+
+	// Check if user has smart allocation mode active
+	mode, err := e.allocationService.GetMode(ctx, deposit.UserID)
+	if err != nil {
+		e.logger.Warn("Failed to check allocation mode, falling back to legacy flow",
+			"error", err,
+			"user_id", deposit.UserID)
+		// Continue with legacy flow on error
+		mode = nil
+	}
+
+	if mode != nil && mode.Active {
+		// Smart allocation mode is active - use allocation service to split funds
+		e.logger.Info("Processing deposit with smart allocation split",
+			"deposit_id", deposit.ID,
+			"user_id", deposit.UserID,
+			"spending_ratio", mode.RatioSpending,
+			"stash_ratio", mode.RatioStash)
+
+		txHash := deposit.TxHash
+		allocationReq := &entities.IncomingFundsRequest{
+			UserID:     deposit.UserID,
+			Amount:     deposit.Amount,
+			EventType:  entities.AllocationEventTypeDeposit,
+			SourceTxID: &txHash,
+			Metadata: map[string]any{
+				"deposit_id": deposit.ID.String(),
+				"chain":      deposit.Chain,
+				"token":      deposit.Token,
+			},
+			DepositID: &deposit.ID,
+		}
+
+		if err := e.allocationService.ProcessIncomingFunds(ctx, allocationReq); err != nil {
+			return fmt.Errorf("failed to process allocation: %w", err)
+		}
+
+		e.logger.Info("Deposit processed with allocation split",
+			"deposit_id", deposit.ID,
+			"user_id", deposit.UserID)
+
+		return nil
+	}
+
+	// Legacy flow: No allocation mode active, credit to usdc_balance
+	e.logger.Debug("Processing deposit with legacy flow (no allocation)",
+		"deposit_id", deposit.ID,
+		"user_id", deposit.UserID)
 
 	// Get or create user's USDC balance account
 	userAccount, err := e.ledgerService.GetOrCreateUserAccount(ctx, deposit.UserID, entities.AccountTypeUSDCBalance)
@@ -260,7 +317,7 @@ func (e *Engine) postDepositLedgerEntries(ctx context.Context, deposit *entities
 		return fmt.Errorf("failed to create ledger transaction: %w", err)
 	}
 
-	e.logger.Info("Deposit ledger entries posted",
+	e.logger.Info("Deposit ledger entries posted (legacy flow)",
 		"deposit_id", deposit.ID,
 		"ledger_tx_id", ledgerTx.ID,
 		"user_account", userAccount.ID,

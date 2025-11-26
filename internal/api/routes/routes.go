@@ -58,6 +58,10 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 
 	// Initialize handlers with services from DI container
 	coreHandlers := handlers.NewCoreHandlers(container.DB, container.Logger)
+	allocationHandlers := handlers.NewAllocationHandlers(
+		container.GetAllocationService(),
+		container.Logger,
+	)
 
 	// Health checks (no auth required)
 	router.GET("/health", coreHandlers.Health)
@@ -221,6 +225,16 @@ integrationHandlers := handlers.NewIntegrationHandlers(
 			{
 				assets.GET("/", integrationHandlers.GetAssets)
 				assets.GET("/:symbol_or_id", integrationHandlers.GetAsset)
+			}
+
+			// Allocation routes - 70/30 Smart Allocation Mode
+			allocation := protected.Group("/user/:id/allocation")
+			{
+				allocation.POST("/enable", allocationHandlers.EnableAllocationMode)
+				allocation.POST("/pause", allocationHandlers.PauseAllocationMode)
+				allocation.POST("/resume", allocationHandlers.ResumeAllocationMode)
+				allocation.GET("/status", allocationHandlers.GetAllocationStatus)
+				allocation.GET("/balances", allocationHandlers.GetAllocationBalances)
 			}
 		}
 

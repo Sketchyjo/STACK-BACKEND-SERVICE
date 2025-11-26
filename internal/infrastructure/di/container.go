@@ -10,21 +10,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
+	"github.com/stack-service/stack_service/internal/adapters/alpaca"
+	"github.com/stack-service/stack_service/internal/adapters/due"
 	"github.com/stack-service/stack_service/internal/domain/entities"
 	"github.com/stack-service/stack_service/internal/domain/services"
+	"github.com/stack-service/stack_service/internal/domain/services/allocation"
+	"github.com/stack-service/stack_service/internal/domain/services/apikey"
 	entitysecret "github.com/stack-service/stack_service/internal/domain/services/entity_secret"
 	"github.com/stack-service/stack_service/internal/domain/services/funding"
 	"github.com/stack-service/stack_service/internal/domain/services/investing"
+	"github.com/stack-service/stack_service/internal/domain/services/ledger"
 	"github.com/stack-service/stack_service/internal/domain/services/onboarding"
 	"github.com/stack-service/stack_service/internal/domain/services/passcode"
+	"github.com/stack-service/stack_service/internal/domain/services/reconciliation"
 	"github.com/stack-service/stack_service/internal/domain/services/session"
 	"github.com/stack-service/stack_service/internal/domain/services/twofa"
-	"github.com/stack-service/stack_service/internal/domain/services/apikey"
 	"github.com/stack-service/stack_service/internal/domain/services/wallet"
-	"github.com/stack-service/stack_service/internal/domain/services/ledger"
-	"github.com/stack-service/stack_service/internal/domain/services/reconciliation"
-	"github.com/stack-service/stack_service/internal/adapters/alpaca"
-	"github.com/stack-service/stack_service/internal/adapters/due"
 	"github.com/stack-service/stack_service/internal/infrastructure/adapters"
 	"github.com/stack-service/stack_service/internal/infrastructure/cache"
 	"github.com/stack-service/stack_service/internal/infrastructure/circle"
@@ -34,7 +35,6 @@ import (
 	"github.com/stack-service/stack_service/pkg/logger"
 	"go.uber.org/zap"
 )
-
 
 // CircleAdapter adapts circle.Client to funding.CircleAdapter interface
 type CircleAdapter struct {
@@ -122,22 +122,23 @@ type Container struct {
 	RedisClient   cache.RedisClient
 
 	// Domain Services
-	OnboardingService    *onboarding.Service
-	OnboardingJobService *services.OnboardingJobService
-	VerificationService  services.VerificationService
-	PasscodeService      *passcode.Service
-	SessionService       *session.Service
-	TwoFAService         *twofa.Service
-	APIKeyService        *apikey.Service
-	WalletService        *wallet.Service
-	FundingService       *funding.Service
-	InvestingService     *investing.Service
-	DueService           *services.DueService
-	BalanceService       *services.BalanceService
-	EntitySecretService    *entitysecret.Service
-	LedgerService          *ledger.Service
-	ReconciliationService  *reconciliation.Service
+	OnboardingService       *onboarding.Service
+	OnboardingJobService    *services.OnboardingJobService
+	VerificationService     services.VerificationService
+	PasscodeService         *passcode.Service
+	SessionService          *session.Service
+	TwoFAService            *twofa.Service
+	APIKeyService           *apikey.Service
+	WalletService           *wallet.Service
+	FundingService          *funding.Service
+	InvestingService        *investing.Service
+	DueService              *services.DueService
+	BalanceService          *services.BalanceService
+	EntitySecretService     *entitysecret.Service
+	LedgerService           *ledger.Service
+	ReconciliationService   *reconciliation.Service
 	ReconciliationScheduler *reconciliation.Scheduler
+	AllocationService       *allocation.Service
 
 	// Additional Repositories
 	OnboardingJobRepo *repositories.OnboardingJobRepository
@@ -425,6 +426,14 @@ func (c *Container) initializeDomainServices() error {
 		c.Logger,
 	)
 
+	// Initialize allocation service
+	allocationRepo := repositories.NewAllocationRepository(sqlxDB, c.Logger)
+	c.AllocationService = allocation.NewService(
+		allocationRepo,
+		c.LedgerService,
+		c.Logger,
+	)
+
 	// Initialize investing service with repositories
 	basketRepo := repositories.NewBasketRepository(c.DB, c.ZapLog)
 	orderRepo := repositories.NewOrderRepository(c.DB, c.ZapLog)
@@ -444,6 +453,7 @@ func (c *Container) initializeDomainServices() error {
 		brokerageAdapter,
 		c.WalletRepo,
 		c.CircleClient,
+		c.AllocationService,
 		c.Logger,
 	)
 
@@ -523,6 +533,11 @@ func (c *Container) GetOnboardingJobService() *services.OnboardingJobService {
 	return c.OnboardingJobService
 }
 
+// GetAllocationService returns the allocation service
+func (c *Container) GetAllocationService() *allocation.Service {
+	return c.AllocationService
+}
+
 // initializeReconciliationService initializes the reconciliation service and scheduler
 func (c *Container) initializeReconciliationService() error {
 	// Initialize metrics service (placeholder - extend pkg/metrics/reconciliation_metrics.go)
@@ -587,26 +602,26 @@ func (a *circleClientAdapter) GetTotalUSDCBalance(ctx context.Context) (decimal.
 		Limit:  10000, // High limit to get all wallets
 		Offset: 0,
 	}
-	
+
 	wallets, _, err := a.walletRepo.ListWithFilters(ctx, filters)
 	if err != nil {
 		return decimal.Zero, fmt.Errorf("failed to list wallets: %w", err)
 	}
-	
+
 	// Aggregate USDC balances from all wallets
 	totalBalance := decimal.Zero
 	for _, wallet := range wallets {
 		if wallet.CircleWalletID == "" {
 			continue // Skip wallets without Circle wallet ID
 		}
-		
+
 		// Get balance for this wallet
 		balanceResp, err := a.client.GetWalletBalances(ctx, wallet.CircleWalletID)
 		if err != nil {
 			// Log error but continue with other wallets
 			continue
 		}
-		
+
 		// Parse USDC balance
 		usdcBalanceStr := balanceResp.GetUSDCBalance()
 		if usdcBalanceStr != "0" {
@@ -616,7 +631,7 @@ func (a *circleClientAdapter) GetTotalUSDCBalance(ctx context.Context) (decimal.
 			}
 		}
 	}
-	
+
 	return totalBalance, nil
 }
 
@@ -633,13 +648,13 @@ func (a *alpacaClientAdapter) GetTotalBuyingPower(ctx context.Context) (decimal.
 		FROM users 
 		WHERE alpaca_account_id IS NOT NULL AND alpaca_account_id != '' AND is_active = true
 	`
-	
+
 	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
 		return decimal.Zero, fmt.Errorf("failed to query users with Alpaca accounts: %w", err)
 	}
 	defer rows.Close()
-	
+
 	var accountIDs []string
 	for rows.Next() {
 		var accountID string
@@ -648,7 +663,7 @@ func (a *alpacaClientAdapter) GetTotalBuyingPower(ctx context.Context) (decimal.
 		}
 		accountIDs = append(accountIDs, accountID)
 	}
-	
+
 	// Aggregate buying power from all accounts
 	totalBuyingPower := decimal.Zero
 	for _, accountID := range accountIDs {
@@ -657,13 +672,13 @@ func (a *alpacaClientAdapter) GetTotalBuyingPower(ctx context.Context) (decimal.
 			// Log error but continue with other accounts
 			continue
 		}
-		
+
 		// Add buying power (already decimal.Decimal)
 		if !account.BuyingPower.IsZero() {
 			totalBuyingPower = totalBuyingPower.Add(account.BuyingPower)
 		}
 	}
-	
+
 	return totalBuyingPower, nil
 }
 
@@ -687,7 +702,7 @@ func (m *reconciliationMetricsService) RecordCheckResult(checkType string, passe
 	// Record check execution
 	commonmetrics.ReconciliationChecksTotal.WithLabelValues(checkType).Inc()
 	commonmetrics.ReconciliationCheckDuration.WithLabelValues(checkType).Observe(duration.Seconds())
-	
+
 	if passed {
 		commonmetrics.ReconciliationChecksPassed.WithLabelValues(checkType).Inc()
 	} else {
