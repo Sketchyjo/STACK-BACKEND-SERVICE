@@ -581,13 +581,14 @@ func TestReverseTransaction_Success(t *testing.T) {
 		ID: accountID2, Balance: decimal.NewFromFloat(0),
 	}, nil)
 
+	// Mock UpdateTransactionStatus to mark original as reversed
+	mockRepo.On("UpdateTransactionStatus", ctx, originalTxID, entities.TransactionStatusReversed).Return(nil)
+
 	// Execute
-	reversalTx, err := service.ReverseTransaction(ctx, originalTxID, "test reversal")
+	err := service.ReverseTransaction(ctx, originalTxID, "test reversal")
 
 	// Assert
 	require.NoError(t, err)
-	assert.NotNil(t, reversalTx)
-	assert.Equal(t, entities.TransactionTypeReversal, reversalTx.TransactionType)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -614,11 +615,10 @@ func TestReverseTransaction_AlreadyReversed(t *testing.T) {
 	mockRepo.On("GetTransactionByID", ctx, originalTxID).Return(originalTx, nil)
 
 	// Execute
-	reversalTx, err := service.ReverseTransaction(ctx, originalTxID, "test reversal")
+	err := service.ReverseTransaction(ctx, originalTxID, "test reversal")
 
 	// Assert
 	require.Error(t, err)
-	assert.Nil(t, reversalTx)
 	assert.Contains(t, err.Error(), "already reversed")
 	mockRepo.AssertExpectations(t)
 }
@@ -638,11 +638,10 @@ func TestReverseTransaction_NotFound(t *testing.T) {
 	mockRepo.On("GetTransactionByID", ctx, originalTxID).Return(nil, sql.ErrNoRows)
 
 	// Execute
-	reversalTx, err := service.ReverseTransaction(ctx, originalTxID, "test reversal")
+	err := service.ReverseTransaction(ctx, originalTxID, "test reversal")
 
 	// Assert
 	require.Error(t, err)
-	assert.Nil(t, reversalTx)
 	mockRepo.AssertExpectations(t)
 }
 

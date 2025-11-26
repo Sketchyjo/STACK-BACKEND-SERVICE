@@ -96,17 +96,13 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 		container.ZapLog,
 	)
 
-	// Initialize integration handlers (includes AI-CFO, ZeroG, Alpaca, Due)
-	integrationHandlers := handlers.NewIntegrationHandlers(
-		container.AlpacaClient,
-		container.GetDueService(),
-		services.NewNotificationService(container.ZapLog),
-		container.GetStorageClient(),
-		container.GetInferenceGateway(),
-		container.GetNamespaceManager(),
-		container.GetAICfoService(),
-		container.Logger,
-	)
+// Initialize integration handlers (Alpaca, Due)
+integrationHandlers := handlers.NewIntegrationHandlers(
+	container.AlpacaClient,
+	container.GetDueService(),
+	services.NewNotificationService(container.ZapLog),
+	container.Logger,
+)
 
 	// Create session validator adapter
 	sessionValidator := NewSessionValidatorAdapter(container.GetSessionService())
@@ -258,8 +254,7 @@ func SetupRoutes(container *di.Container) *gin.Engine {
 		}
 	}
 
-	// Setup ZeroG and AI routes
-	SetupZeroGRoutes(router, integrationHandlers, container.ZapLog)
+	// ZeroG and dedicated AI-CFO HTTP routes have been removed.
 
 	return router
 }
