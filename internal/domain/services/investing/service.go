@@ -28,17 +28,23 @@ type AllocationService interface {
 	LogDeclinedSpending(ctx context.Context, userID uuid.UUID, amount decimal.Decimal, reason string) error
 }
 
+// AllocationNotificationManager interface for sending allocation notifications
+type AllocationNotificationManager interface {
+	NotifyTransactionDeclined(ctx context.Context, userID uuid.UUID, amount decimal.Decimal, transactionType string) error
+}
+
 // Service handles investing operations - baskets, orders, portfolio management
 type Service struct {
-	basketRepo        BasketRepository
-	orderRepo         OrderRepository
-	positionRepo      PositionRepository
-	balanceRepo       BalanceRepository
-	brokerageAPI      BrokerageAdapter
-	walletRepo        WalletBalanceProvider
-	circleClient      CircleClient
-	allocationService AllocationService
-	logger            *logger.Logger
+	basketRepo         BasketRepository
+	orderRepo          OrderRepository
+	positionRepo       PositionRepository
+	balanceRepo        BalanceRepository
+	brokerageAPI       BrokerageAdapter
+	walletRepo         WalletBalanceProvider
+	circleClient       CircleClient
+	allocationService  AllocationService
+	allocationNotifier AllocationNotificationManager
+	logger             *logger.Logger
 }
 
 // BasketRepository interface for basket operations
@@ -98,18 +104,20 @@ func NewService(
 	walletRepo WalletBalanceProvider,
 	circleClient CircleClient,
 	allocationService AllocationService,
+	allocationNotifier AllocationNotificationManager,
 	logger *logger.Logger,
 ) *Service {
 	return &Service{
-		basketRepo:        basketRepo,
-		orderRepo:         orderRepo,
-		positionRepo:      positionRepo,
-		balanceRepo:       balanceRepo,
-		brokerageAPI:      brokerageAPI,
-		walletRepo:        walletRepo,
-		circleClient:      circleClient,
-		allocationService: allocationService,
-		logger:            logger,
+		basketRepo:         basketRepo,
+		orderRepo:          orderRepo,
+		positionRepo:       positionRepo,
+		balanceRepo:        balanceRepo,
+		brokerageAPI:       brokerageAPI,
+		walletRepo:         walletRepo,
+		circleClient:       circleClient,
+		allocationService:  allocationService,
+		allocationNotifier: allocationNotifier,
+		logger:             logger,
 	}
 }
 
@@ -175,6 +183,11 @@ func (s *Service) CreateOrder(ctx context.Context, userID uuid.UUID, req *entiti
 				
 				// Log declined spending event
 				_ = s.allocationService.LogDeclinedSpending(ctx, userID, amount, "investment")
+				
+				// Send notification to user
+				if s.allocationNotifier != nil {
+					_ = s.allocationNotifier.NotifyTransactionDeclined(ctx, userID, amount, "investment")
+				}
 				
 				return nil, entities.ErrSpendingLimitReached
 			}

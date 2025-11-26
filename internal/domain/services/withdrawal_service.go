@@ -20,16 +20,22 @@ type AllocationService interface {
 	LogDeclinedSpending(ctx context.Context, userID uuid.UUID, amount decimal.Decimal, reason string) error
 }
 
+// AllocationNotificationManager interface for sending allocation notifications
+type AllocationNotificationManager interface {
+	NotifyTransactionDeclined(ctx context.Context, userID uuid.UUID, amount decimal.Decimal, transactionType string) error
+}
+
 // WithdrawalService handles USD to USDC withdrawal operations
 type WithdrawalService struct {
-	withdrawalRepo    WithdrawalRepository
-	alpacaAPI         AlpacaAdapter
-	dueAPI            DueWithdrawalAdapter
-	allocationService AllocationService
-	logger            *logger.Logger
-	alpacaBreaker     *circuitbreaker.CircuitBreaker
-	dueBreaker        *circuitbreaker.CircuitBreaker
-	queuePublisher    queue.Publisher
+	withdrawalRepo        WithdrawalRepository
+	alpacaAPI             AlpacaAdapter
+	dueAPI                DueWithdrawalAdapter
+	allocationService     AllocationService
+	allocationNotifier    AllocationNotificationManager
+	logger                *logger.Logger
+	alpacaBreaker         *circuitbreaker.CircuitBreaker
+	dueBreaker            *circuitbreaker.CircuitBreaker
+	queuePublisher        queue.Publisher
 }
 
 // WithdrawalRepository interface for withdrawal persistence
@@ -79,6 +85,7 @@ func NewWithdrawalService(
 	alpacaAPI AlpacaAdapter,
 	dueAPI DueWithdrawalAdapter,
 	allocationService AllocationService,
+	allocationNotifier AllocationNotificationManager,
 	logger *logger.Logger,
 	queuePublisher queue.Publisher,
 ) *WithdrawalService {
@@ -93,14 +100,15 @@ func NewWithdrawalService(
 		queuePublisher = queue.NewMockPublisher()
 	}
 	return &WithdrawalService{
-		withdrawalRepo:    withdrawalRepo,
-		alpacaAPI:         alpacaAPI,
-		dueAPI:            dueAPI,
-		allocationService: allocationService,
-		logger:            logger,
-		alpacaBreaker:     circuitbreaker.New(cfg),
-		dueBreaker:        circuitbreaker.New(cfg),
-		queuePublisher:    queuePublisher,
+		withdrawalRepo:     withdrawalRepo,
+		alpacaAPI:          alpacaAPI,
+		dueAPI:             dueAPI,
+		allocationService:  allocationService,
+		allocationNotifier: allocationNotifier,
+		logger:             logger,
+		alpacaBreaker:      circuitbreaker.New(cfg),
+		dueBreaker:         circuitbreaker.New(cfg),
+		queuePublisher:     queuePublisher,
 	}
 }
 
@@ -127,6 +135,11 @@ func (s *WithdrawalService) InitiateWithdrawal(ctx context.Context, req *entitie
 			
 			// Log declined spending event
 			_ = s.allocationService.LogDeclinedSpending(ctx, req.UserID, req.Amount, "withdrawal")
+			
+			// Send notification to user
+			if s.allocationNotifier != nil {
+				_ = s.allocationNotifier.NotifyTransactionDeclined(ctx, req.UserID, req.Amount, "withdrawal")
+			}
 			
 			return nil, entities.ErrSpendingLimitReached
 		}
