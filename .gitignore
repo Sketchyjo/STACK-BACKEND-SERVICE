@@ -4,6 +4,8 @@
 *.dll
 *.so
 *.dylib
+main
+rail_service
 stack_service
 bin/
 dist/
@@ -26,6 +28,7 @@ go.work
 .env.local
 .env.*.local
 *.env
+!.env.example
 
 # Security sensitive files
 *.key

@@ -30,6 +30,32 @@ type Config struct {
 	Due            DueConfig            `mapstructure:"due"`
 	Workers        WorkerConfig         `mapstructure:"workers"`
 	Reconciliation ReconciliationConfig `mapstructure:"reconciliation"`
+	SocialAuth     SocialAuthConfig     `mapstructure:"social_auth"`
+	WebAuthn       WebAuthnConfig       `mapstructure:"webauthn"`
+	AI             AIConfig             `mapstructure:"ai"`
+}
+
+// AIConfig contains AI provider configuration
+type AIConfig struct {
+	OpenAI  OpenAIConfig  `mapstructure:"openai"`
+	Gemini  GeminiConfig  `mapstructure:"gemini"`
+	Primary string        `mapstructure:"primary"` // "openai" or "gemini"
+}
+
+// OpenAIConfig contains OpenAI API configuration
+type OpenAIConfig struct {
+	APIKey      string  `mapstructure:"api_key"`
+	Model       string  `mapstructure:"model"`
+	MaxTokens   int     `mapstructure:"max_tokens"`
+	Temperature float64 `mapstructure:"temperature"`
+}
+
+// GeminiConfig contains Google Gemini API configuration
+type GeminiConfig struct {
+	APIKey      string  `mapstructure:"api_key"`
+	Model       string  `mapstructure:"model"`
+	MaxTokens   int     `mapstructure:"max_tokens"`
+	Temperature float64 `mapstructure:"temperature"`
 }
 
 type ServerConfig struct {
@@ -154,13 +180,18 @@ type KYCConfig struct {
 }
 
 type EmailConfig struct {
-	Provider    string `mapstructure:"provider"` // "sendgrid", "resend"
-	APIKey      string `mapstructure:"api_key"`
-	FromEmail   string `mapstructure:"from_email"`
-	FromName    string `mapstructure:"from_name"`
-	BaseURL     string `mapstructure:"base_url"`    // For verification links
-	Environment string `mapstructure:"environment"` // "development", "staging", "production"
-	ReplyTo     string `mapstructure:"reply_to"`
+	Provider     string `mapstructure:"provider"` // "sendgrid", "resend", "mailpit", "smtp"
+	APIKey       string `mapstructure:"api_key"`
+	FromEmail    string `mapstructure:"from_email"`
+	FromName     string `mapstructure:"from_name"`
+	BaseURL      string `mapstructure:"base_url"`    // For verification links
+	Environment  string `mapstructure:"environment"` // "development", "staging", "production"
+	ReplyTo      string `mapstructure:"reply_to"`
+	SMTPHost     string `mapstructure:"smtp_host"`
+	SMTPPort     int    `mapstructure:"smtp_port"`
+	SMTPUsername string `mapstructure:"smtp_username"`
+	SMTPPassword string `mapstructure:"smtp_password"`
+	SMTPUseTLS   bool   `mapstructure:"smtp_use_tls"`
 }
 
 type SMSConfig struct {
@@ -208,6 +239,26 @@ type ReconciliationConfig struct {
 	DailyRunTime         string `mapstructure:"daily_run_time"`         // Time of day for daily run (HH:MM format)
 	AutoCorrectLowSeverity bool `mapstructure:"auto_correct_low_severity"` // Auto-correct <$1 discrepancies
 	AlertWebhookURL      string `mapstructure:"alert_webhook_url"`      // Webhook URL for alerts
+}
+
+// SocialAuthConfig contains OAuth provider configuration
+type SocialAuthConfig struct {
+	Google OAuthProviderConfig `mapstructure:"google"`
+	Apple  OAuthProviderConfig `mapstructure:"apple"`
+}
+
+// OAuthProviderConfig contains OAuth provider credentials
+type OAuthProviderConfig struct {
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURI  string `mapstructure:"redirect_uri"`
+}
+
+// WebAuthnConfig contains WebAuthn/Passkey configuration
+type WebAuthnConfig struct {
+	RPDisplayName string   `mapstructure:"rp_display_name"` // Relying Party display name
+	RPID          string   `mapstructure:"rp_id"`           // Relying Party ID (domain)
+	RPOrigins     []string `mapstructure:"rp_origins"`      // Allowed origins
 }
 
 // ZeroGConfig contains configuration for 0G Network integration
@@ -386,6 +437,9 @@ func setDefaults() {
 	viper.SetDefault("email.environment", "development")
 	viper.SetDefault("email.base_url", "http://localhost:3000")
 	viper.SetDefault("email.reply_to", "")
+	viper.SetDefault("email.smtp_host", "localhost")
+	viper.SetDefault("email.smtp_port", 1025)
+	viper.SetDefault("email.smtp_use_tls", false)
 
 	// SMS defaults
 	viper.SetDefault("sms.provider", "")
@@ -398,6 +452,15 @@ func setDefaults() {
 	viper.SetDefault("verification.rate_limit_per_hour", 3)
 
 	viper.SetDefault("security.session_timeout", 3600) // 1 hour
+
+	// AI Provider defaults
+	viper.SetDefault("ai.primary", "openai")
+	viper.SetDefault("ai.openai.model", "gpt-4o-mini")
+	viper.SetDefault("ai.openai.max_tokens", 500)
+	viper.SetDefault("ai.openai.temperature", 0.7)
+	viper.SetDefault("ai.gemini.model", "gemini-1.5-flash")
+	viper.SetDefault("ai.gemini.max_tokens", 500)
+	viper.SetDefault("ai.gemini.temperature", 0.7)
 
 	// 0G Network defaults
 	// General 0G settings
@@ -565,6 +628,29 @@ func overrideFromEnv() {
 	}
 	if replyTo := os.Getenv("EMAIL_REPLY_TO"); replyTo != "" {
 		viper.Set("email.reply_to", replyTo)
+	}
+	if smtpHost := os.Getenv("SMTP_HOST"); smtpHost != "" {
+		viper.Set("email.smtp_host", smtpHost)
+	}
+	if smtpPort := os.Getenv("SMTP_PORT"); smtpPort != "" {
+		viper.Set("email.smtp_port", smtpPort)
+	}
+	if smtpUser := os.Getenv("SMTP_USERNAME"); smtpUser != "" {
+		viper.Set("email.smtp_username", smtpUser)
+	}
+	if smtpPass := os.Getenv("SMTP_PASSWORD"); smtpPass != "" {
+		viper.Set("email.smtp_password", smtpPass)
+	}
+
+	// AI Providers
+	if openaiKey := os.Getenv("OPENAI_API_KEY"); openaiKey != "" {
+		viper.Set("ai.openai.api_key", openaiKey)
+	}
+	if geminiKey := os.Getenv("GEMINI_API_KEY"); geminiKey != "" {
+		viper.Set("ai.gemini.api_key", geminiKey)
+	}
+	if aiPrimary := os.Getenv("AI_PRIMARY_PROVIDER"); aiPrimary != "" {
+		viper.Set("ai.primary", aiPrimary)
 	}
 
 	// 0G Network
